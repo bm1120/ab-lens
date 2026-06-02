@@ -1,161 +1,161 @@
-# 🔬 AB Lens
+# 🔬 ab-lens
 
-A/B 테스트 결과를 입력하면 AI가 통계 해석·편향 감지·인과추론 대안을 1페이지로 정리합니다.
+> **실험 설계 의도를 기억하고, 결과 해석 시 인지편향을 감지하는 유일한 도구**
 
-![demo](demo/demo.gif)
-
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/streamlit-1.35+-red.svg)](https://streamlit.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A/B 테스트를 처음부터 끝까지 — 막연한 아이디어에서 날카로운 가설로, 설계에서 결과 해석까지.
 
 ---
 
-## Overview
+## 왜 ab-lens인가
 
-AB Lens는 A/B 테스트 결과 해석을 돕는 AI 기반 1페이지 브리핑 도구입니다.  
-실험 담당자가 통계 해석, 인지 편향 감지, 인과추론 대안 탐색을 빠르게 수행할 수 있도록 설계되었습니다.
+| 도구 | 가설 고도화 | 샘플 계산 | 편향 감지 | 설계→결과 이월 |
+|---|---|---|---|---|
+| Fibr / Personizely | ❌ | ✅ | ❌ | ❌ |
+| CraftUpLearn | ❌ | ✅ | ❌ | ❌ |
+| pvalue.net | ❌ | ✅ | ❌ | ❌ |
+| **ab-lens** | ✅ | ✅ | ✅ | ✅ |
 
-**핵심 파이프라인:**
+기존 도구들은 가설이 이미 완성됐다고 가정하고 통계 계산만 합니다.
+ab-lens는 **"버튼 색을 바꾸면 클릭률이 오를 것 같다"** 수준의 아이디어에서 시작합니다.
+
+---
+
+## 핵심 기능
+
+### 탭 1 — 실험 설계
+
+**가설 고도화** (thinking-protocol 이식)
+- 아이디어 입력 → JTBD 재프레이밍 → 암묵적 전제 드러내기
+- 대안 가설 발산 (SCAMPER 구조)
+- 메커니즘 검증: `개입 → 행동 변화 → 지표` 경로 명시
+- 인지편향 스크리닝 (Confirmation Bias / Anchoring / Sunk Cost)
+- Adversarial Refinement로 최종 가설 수렴
+
+**설계 파라미터 자동 추출**
+- 고도화된 가설 → 지표·MDE·샘플 사이즈 구조화 JSON 자동 매핑
+- 지표 타입 분기: 비율 / 연속형 / 카운트 / 클러스터 (ICC 포함)
+- 설계서 Markdown 다운로드
+
+### 탭 2 — 결과 분석
+
+**Context Loop** ⭐ 핵심 해자
+- 설계 시 합의한 약속(MDE·지표·샘플)과 실제 결과 대조
+- **peeking** 배지: 샘플 미달 조기 종료 감지
+- **metric_swap** 배지: 체리피킹 — 약속한 1차 지표가 아닌 지표가 유의
+- **below_mde** 배지: 통계적 유의성은 있으나 실무적으로 무의미한 효과
+
+**통계 분석**
+- Two-proportion z-test, 검정력 분석, SRM(카이제곱) 감지
+- FWER 보정 (Bonferroni), 설계 시 합의 alpha 자동 이월
+
+**인지심리 기반 편향 감지** (논문 근거 매핑)
+- 7개 편향 레퍼런스 풀 하드코딩 (Kahneman 2011, Simmons 2011, Kohavi 2020 등)
+- 설계 시점 편향 경고 ↔ 결과 시점 편향 교차 참조
+
+**의사결정 추천**
+- 시나리오 3개 (출시 / 추가실험 / 조건부 출시) + 신뢰도
+
+---
+
+## 아키텍처
+
 ```
-사용자 입력 → 통계 분석 → 편향 감지 (LLM) → 추천 생성 (LLM) → 1페이지 브리핑
+탭1: 아이디어 → [Trivial Router] → [가설 고도화 파이프라인]
+                                        ↓ Quick(~20초) / Deep(~40초)
+                                   HypothesisExpander (Framer+Ideator)
+                                   HypothesisSharpener (Validator, 수렴)
+                                   BiasScreener (Warning only)
+                                        ↓
+                               사실 수치 입력 (baseline, MDE, n)
+                                        ↓
+                               DesignContext + 설계서.md 생성
+                               ab-design-context.json 다운로드
+                                   ↓ (세션 자동 이월 또는 JSON 업로드)
+탭2: 결과 수치 → [Context Loop 대조] → peeking/metric_swap/below_mde 배지
+              → StatisticalAnalyst → BiasDetector → DecisionRecommender
+              → 1페이지 브리핑
 ```
 
 ---
 
-## Features
-
-- 📊 **통계 분석**: Two-proportion z-test, 검정력(Power) 분석, SRM 감지
-- ⚠️ **편향 감지**: Confirmation Bias, Sunk Cost Fallacy, Anchoring Bias, p-hacking/HARKing, Novelty Effect 5가지 자동 감지
-- 🔗 **인과추론**: 무작위 배정이 없는 경우 대안적 인과추론 방법 제안
-- 💡 **의사결정 지원**: 출시/추가실험/조건부출시 3개 시나리오 + 최종 추천
-- 🌐 **이중언어**: 한국어/English 토글 지원
-- 🔒 **Safety Layer**: 세션당 요청 제한 (10회) + 입력 길이 제한 (3000자)
-- ⚡ **Prompt Caching**: Anthropic API 비용 최적화
-
----
-
-## Quick Start
-
-### 1. 환경 설치
+## 설치 & 실행
 
 ```bash
-# uv 설치 (없는 경우)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 프로젝트 클론
-git clone https://github.com/yourname/ab-lens.git
-cd ab-lens
-
-# 의존성 설치
+# uv 사용 (권장)
 uv sync
-```
-
-### 2. 앱 실행
-
-```bash
 uv run streamlit run app.py
+
+# pip 사용
+pip install -e .
+streamlit run app.py
 ```
 
-브라우저에서 `http://localhost:8501` 접속
+### LLM 설정
 
-### 3. API 키 설정
+사이드바에서 API 키 입력 또는 `~/.hermes/.env`에 자동 로드:
 
-- 사이드바에서 Anthropic API 키 입력 (`sk-ant-...`)
-- [Anthropic Console](https://console.anthropic.com/)에서 발급
+```env
+# Claude Code 구독 (비용 0, 권장)
+CLAUDE_CODE_OAUTH_TOKEN=your_oauth_token
+
+# 또는 OpenRouter
+OPENROUTER_API_KEY=your_openrouter_key
+```
+
+| Provider | 모델 | 비용 |
+|---|---|---|
+| Claude Code OAuth | claude-haiku-4-5 | 구독 포함 (무료) |
+| OpenRouter | claude-sonnet-4-5 | 사용량 과금 |
 
 ---
 
-## Architecture
+## 기술 스택
 
-```
-ab-lens/
-├── app.py                  # Streamlit 메인 앱
-├── src/
-│   ├── schemas.py          # Pydantic v2 데이터 모델
-│   ├── safety.py           # 요청 제한 Safety Layer
-│   ├── agents/
-│   │   ├── statistical.py  # 통계 분석 (scipy, statsmodels)
-│   │   ├── bias_detector.py # 편향 감지 (Anthropic API)
-│   │   └── recommender.py  # 추천 생성 (Anthropic API)
-│   ├── prompts/
-│   │   ├── bias_check.py   # 편향 감지 System Prompt
-│   │   └── recommender.py  # 추천 System Prompt
-│   └── i18n/
-│       ├── ko.py           # 한국어 텍스트
-│       └── en.py           # English texts
-├── tests/
-│   ├── test_statistical.py # 통계 함수 단위 테스트
-│   ├── test_bias_detector.py # 편향 감지 테스트 (mock)
-│   └── scenarios/          # 테스트 시나리오 JSON
-└── demo/
-    └── scenarios.py        # 데모 시나리오 객체
-```
-
-**실행 흐름:**
-1. `analyze_stats()` — scipy 기반 순수 통계 계산 (API 없음)
-2. `detect_bias()` — Claude API 호출, Prompt Caching 적용
-3. `recommend()` — Claude API 호출, Prompt Caching 적용
+- **LLM**: Anthropic Claude (Claude Code OAuth / OpenRouter)
+- **UI**: Streamlit (단일 앱, 탭 구조)
+- **스키마**: Pydantic v2 (JSON Schema 프롬프트 주입으로 구조화 출력 강제)
+- **통계**: scipy, statsmodels
+- **테스트**: pytest, 106개 통과 (TDD + e2e)
 
 ---
 
-## Tech Stack
-
-| 구분 | 기술 |
-|------|------|
-| Language | Python 3.11 |
-| Package Manager | uv |
-| Web Framework | Streamlit >= 1.35 |
-| AI SDK | Anthropic >= 0.30 |
-| Data Validation | Pydantic v2 |
-| Statistics | scipy >= 1.11, statsmodels |
-| Testing | pytest >= 8.0, pytest-mock |
-
----
-
-## Running Tests
+## 테스트
 
 ```bash
-# 전체 테스트 실행
-uv run pytest
+# 전체 (단위 + 통합, mock LLM)
+uv run pytest tests/ -q
 
-# 상세 출력
-uv run pytest -v
-
-# 특정 테스트만
-uv run pytest tests/test_statistical.py -v
-```
-
-테스트는 Anthropic API를 호출하지 않으므로 API 키 없이 실행 가능합니다.
-
----
-
-## Streamlit Cloud 배포
-
-1. GitHub에 레포지토리 푸시
-2. [Streamlit Cloud](https://streamlit.io/cloud)에서 배포
-3. Secrets 설정: `ANTHROPIC_API_KEY` (선택 - 사용자가 직접 입력 가능)
-
-```toml
-# .streamlit/secrets.toml (선택)
-ANTHROPIC_API_KEY = "sk-ant-..."
+# 탭2 e2e (Claude Code OAuth 실제 호출 필요)
+uv run pytest tests/test_tab2_e2e.py -v -s
 ```
 
 ---
 
-## Contributing
+## 배경
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+인지심리학 석사 + 신경과학 연구 → 의료 AI → 산업 데이터 분석 경로를 거치며,
+실무에서 반복적으로 목격한 패턴:
 
----
+- PM이 "버튼 색 바꾸면 클릭률 오를 것 같다"는 가설을 그대로 실험 설계에 올림
+- 결과가 나오면 p=0.049를 "성공", p=0.051을 "샘플 더 모으자"로 해석
+- 사전에 합의한 MDE나 지표가 분석 시점에 슬그머니 바뀜
 
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+이 도구는 [thinking-protocol-plugin](https://github.com/bm1120/thinking-protocol-plugin)의
+`framer / ideator / bias-check / validator` 로직을 A/B 테스트 도메인에 이식한 것입니다.
 
 ---
 
-*Built with ❤️ using Streamlit + Anthropic Claude*
+## 로드맵
+
+- [x] 가설 고도화 파이프라인 (Quick/Deep Mode)
+- [x] Context Loop (peeking / metric_swap / below_mde)
+- [x] 탭2 Claude Code OAuth e2e 검증
+- [ ] DeepCritique 2라운드
+- [ ] LLM 프롬프트 품질 튜닝
+- [ ] 다중 사용자 / API 제품화 (FastAPI 분리)
+
+---
+
+## 라이선스
+
+MIT

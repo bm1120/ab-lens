@@ -1,0 +1,29 @@
+{
+  "schema_version": "8.0",
+  "sharpened_hypothesis": "결제 버튼을 상단으로 옮기면 체크아웃 전환율이 오른다",
+  "primary_metric": "전환율",
+  "metric_type": "proportion",
+  "agreed_mde": 0.05,
+  "baseline": 0.1,
+  "std_dev": null,
+  "alpha": 0.05,
+  "power": 0.8,
+  "target_sample_size": 43000,
+  "experiment_duration_days": 14,
+  "randomization_unit": "user",
+  "icc": null,
+  "stop_criteria": "목표 표본 43,000 도달 시 종료, 중간 peeking 금지",
+  "design_quality": {
+    "required_pass": true,
+    "required_items": {
+      "primary_metric_defined": true,
+      "randomization_unit_clear": true
+    },
+    "advisory_score": 80,
+    "advisory_items": {
+      "hypothesis_sharpened": true
+    }
+  },
+  "bias_screening_summary": "Confirmation Bias 경고: 선호 결과 지지 증거만 탐색 위험",
+  "alternative_selected": null
+}
