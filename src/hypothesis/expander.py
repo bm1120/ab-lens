@@ -17,6 +17,10 @@ SYSTEM_KO = (
     "(2) 숨은 암묵적 전제를 드러내며, "
     "(3) 측정 가능한 개입에 한해 서로 다른 대안 가설 3개를 발산합니다. "
     "이 단계에서는 평가·수렴하지 마세요(발산만). "
+    "jtbd_reframe 은 반드시 'When [상황], I want to [목표], so I can [결과]' 형식의 "
+    "완전한 문장으로 작성하세요. "
+    "예시: 'When 사용자가 CTA 버튼을 봤을 때, I want to 즉각적으로 클릭하고 싶다, "
+    "so I can 원하는 정보에 빠르게 도달할 수 있다.' "
     '반드시 JSON으로만 답하세요: {"jtbd_reframe": str, "implicit_assumptions": [str], '
     '"candidate_hypotheses": [str, str, str]}'
 )
