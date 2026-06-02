@@ -12,6 +12,9 @@ from openai import APIError as OAIAPIError
 from src.schemas import LLMProvider
 
 ANTHROPIC_MODEL = "claude-3-5-haiku-20241022"
+CLAUDE_CODE_MODEL = "claude-haiku-4-5-20251001"  # Claude Code 구독으로 접근 가능한 모델
+OAUTH_BETA_HEADER = "oauth-2025-04-20"
+MAX_TOKENS = 4096  # HypothesisOutput 등 큰 구조화 출력이 잘리지 않도록
 OPENROUTER_MODEL = "anthropic/claude-sonnet-4-5"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_HTTP_REFERER = "https://github.com/bm1120/ab-lens"
@@ -44,10 +47,43 @@ def call_llm(
     """
     if provider == LLMProvider.ANTHROPIC:
         return _call_anthropic(prompt=prompt, system=system, api_key=api_key)
+    elif provider == LLMProvider.CLAUDE_CODE:
+        return _call_claude_code(prompt=prompt, system=system, token=api_key)
     elif provider == LLMProvider.OPENROUTER:
         return _call_openrouter(prompt=prompt, system=system, api_key=api_key)
     else:
         raise ValueError(f"지원하지 않는 provider: {provider}")
+
+
+def _call_claude_code(prompt: str, system: str, token: str) -> str:
+    """Claude Code 구독 OAuth 토큰으로 호출 (auth_token=Bearer + oauth 베타 헤더)."""
+    try:
+        client = anthropic.Anthropic(
+            auth_token=token,
+            default_headers={"anthropic-beta": OAUTH_BETA_HEADER},
+        )
+        response = client.messages.create(
+            model=CLAUDE_CODE_MODEL,
+            max_tokens=MAX_TOKENS,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": prompt}],
+        )
+        block = response.content[0]
+        if not isinstance(block, anthropic.types.TextBlock):
+            raise RuntimeError(f"예상치 못한 응답 블록 타입: {type(block)}")
+        return block.text
+    except anthropic.AuthenticationError as e:
+        raise ValueError(f"Claude Code OAuth 인증 오류: {e}") from e
+    except anthropic.RateLimitError as e:
+        raise RuntimeError(f"Claude Code 요청 한도 초과: {e}") from e
+    except anthropic.APIError as e:
+        raise RuntimeError(f"Claude Code API 오류: {e}") from e
 
 
 def _call_anthropic(prompt: str, system: str, api_key: str) -> str:
@@ -56,7 +92,7 @@ def _call_anthropic(prompt: str, system: str, api_key: str) -> str:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
-            max_tokens=2048,
+            max_tokens=MAX_TOKENS,
             system=[
                 {
                     "type": "text",
@@ -88,7 +124,7 @@ def _call_openrouter(prompt: str, system: str, api_key: str) -> str:
         )
         response = client.chat.completions.create(
             model=OPENROUTER_MODEL,
-            max_tokens=2048,
+            max_tokens=MAX_TOKENS,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},

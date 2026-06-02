@@ -16,6 +16,7 @@ from src.agents.bias_detector import detect_bias
 from src.agents.recommender import recommend
 from src.safety import SessionLimiter
 from src.i18n import get_texts
+from src.config import get_credential
 from src.design_schemas import DesignContext
 from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
@@ -91,10 +92,12 @@ def render_sidebar() -> tuple[str, str, LLMProvider]:
 
         st.divider()
 
-        # Provider 선택
+        # Provider 선택 (Claude Code 구독 = 비용 0, 기본값)
+        cc_label = "Claude Code 구독 (무료)" if lang == "ko" else "Claude Code subscription (free)"
         provider_options = {
-            t["provider_anthropic"]: LLMProvider.ANTHROPIC,
+            cc_label: LLMProvider.CLAUDE_CODE,
             t["provider_openrouter"]: LLMProvider.OPENROUTER,
+            t["provider_anthropic"]: LLMProvider.ANTHROPIC,
         }
         provider_label = st.radio(
             t["provider_select"],
@@ -103,20 +106,36 @@ def render_sidebar() -> tuple[str, str, LLMProvider]:
         )
         provider = provider_options[provider_label]
 
-        # provider에 따라 API 키 레이블 변경
-        if provider == LLMProvider.ANTHROPIC:
+        # provider별 자격증명 환경변수명 + 레이블/플레이스홀더
+        cred_env = {
+            LLMProvider.CLAUDE_CODE: "CLAUDE_CODE_OAUTH_TOKEN",
+            LLMProvider.OPENROUTER: "OPENROUTER_API_KEY",
+            LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+        }[provider]
+        placeholder = {
+            LLMProvider.CLAUDE_CODE: "sk-ant-oat01-...",
+            LLMProvider.OPENROUTER: "sk-or-...",
+            LLMProvider.ANTHROPIC: "sk-ant-...",
+        }[provider]
+        if provider == LLMProvider.CLAUDE_CODE:
+            api_key_label = "Claude Code OAuth 토큰" if lang == "ko" else "Claude Code OAuth token"
+        elif provider == LLMProvider.ANTHROPIC:
             api_key_label = t["api_key_label_anthropic"]
-            api_key_placeholder = "sk-ant-..."
         else:
             api_key_label = t["api_key_label_openrouter"]
-            api_key_placeholder = "sk-or-..."
 
+        # ~/.hermes/.env 에서 자동 로드 (있으면 프리필)
+        auto_key = get_credential(cred_env) or ""
         api_key = st.text_input(
             api_key_label,
             type="password",
+            value=auto_key,
             help=t["sidebar_api_key_help"],
-            placeholder=api_key_placeholder,
+            placeholder=placeholder,
         )
+        if auto_key:
+            st.caption("✅ 환경(~/.hermes/.env)에서 자동 로드됨" if lang == "ko"
+                       else "✅ Auto-loaded from ~/.hermes/.env")
 
         st.divider()
 

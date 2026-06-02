@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    CLAUDE_CODE = "claude_code"  # Claude Code 구독 OAuth 토큰 (비용 0)
 
 
 class ABTestInput(BaseModel):

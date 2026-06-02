@@ -28,6 +28,18 @@ def extract_json(text: str) -> dict:
     raise ValueError(f"JSON을 응답에서 찾을 수 없습니다: {text[:200]}")
 
 
+def _schema_instruction(schema: type[BaseModel]) -> str:
+    """LLM 이 정확한 필드명으로 답하도록 JSON Schema 를 프롬프트에 주입."""
+    schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)
+    return (
+        "\n\n# 출력 형식 (엄수)\n"
+        "아래 JSON Schema 의 properties 키와 **정확히 일치**하는 JSON 객체로만 답하세요. "
+        "required 필드를 모두 포함하고, 스키마에 없는 키를 추가하지 마세요. "
+        "설명 문장 없이 JSON 만 출력하세요.\n"
+        f"```json\n{schema_json}\n```"
+    )
+
+
 def call_structured(
     prompt: str,
     system: str,
@@ -36,6 +48,10 @@ def call_structured(
     provider: LLMProvider,
     lang: str = "ko",
 ) -> T:
-    """LLM 호출 → JSON 추출 → schema 로 검증된 모델 반환."""
-    text = call_llm(prompt=prompt, system=system, api_key=api_key, provider=provider, lang=lang)
+    """LLM 호출 → JSON 추출 → schema 로 검증된 모델 반환.
+
+    schema 의 JSON Schema 를 system 프롬프트에 주입해 필드명 불일치를 방지한다.
+    """
+    guided_system = system + _schema_instruction(schema)
+    text = call_llm(prompt=prompt, system=guided_system, api_key=api_key, provider=provider, lang=lang)
     return schema.model_validate(extract_json(text))
