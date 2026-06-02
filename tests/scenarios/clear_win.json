@@ -1,0 +1,15 @@
+{
+  "metric_name": "전환율",
+  "treatment_value": 0.15,
+  "control_value": 0.10,
+  "p_value": 0.02,
+  "sample_size_treatment": 10000,
+  "sample_size_control": 10000,
+  "experiment_days": 21,
+  "dev_cost_weeks": 2.0,
+  "business_priority": "high",
+  "prior_expectation": "신규 랜딩 페이지로 10% 이상 전환율 향상 기대",
+  "is_random_assignment": true,
+  "multiple_metrics": false,
+  "business_context": "리브랜딩 캠페인의 일환으로 신규 랜딩 페이지를 테스트. 주요 KPI는 전환율이며 출시 여부를 결정해야 함."
+}

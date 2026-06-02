@@ -1,0 +1,15 @@
+{
+  "metric_name": "회원가입 전환율",
+  "treatment_value": 0.13,
+  "control_value": 0.12,
+  "p_value": 0.04,
+  "sample_size_treatment": 9500,
+  "sample_size_control": 5500,
+  "experiment_days": 14,
+  "dev_cost_weeks": 2.0,
+  "business_priority": "high",
+  "prior_expectation": null,
+  "is_random_assignment": true,
+  "multiple_metrics": false,
+  "business_context": "신규 가입 폼 간소화 실험. 샘플 비율이 예상과 다르게 배분됨 (기대: 50:50, 실제: ~63:37)."
+}

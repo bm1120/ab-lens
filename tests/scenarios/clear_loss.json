@@ -1,0 +1,15 @@
+{
+  "metric_name": "구매 전환율",
+  "treatment_value": 0.06,
+  "control_value": 0.10,
+  "p_value": 0.01,
+  "sample_size_treatment": 8000,
+  "sample_size_control": 8000,
+  "experiment_days": 14,
+  "dev_cost_weeks": 3.0,
+  "business_priority": "high",
+  "prior_expectation": "새로운 체크아웃 플로우로 전환율 개선 기대",
+  "is_random_assignment": true,
+  "multiple_metrics": false,
+  "business_context": "결제 프로세스 간소화를 위해 3단계 체크아웃을 1단계로 줄이는 실험. 개발에 3주 투자했으나 결과가 매우 부정적."
+}

@@ -1,0 +1,15 @@
+{
+  "metric_name": "클릭율 (CTR)",
+  "treatment_value": 0.052,
+  "control_value": 0.050,
+  "p_value": 0.08,
+  "sample_size_treatment": 6000,
+  "sample_size_control": 6000,
+  "experiment_days": 10,
+  "dev_cost_weeks": 1.0,
+  "business_priority": "medium",
+  "prior_expectation": null,
+  "is_random_assignment": true,
+  "multiple_metrics": false,
+  "business_context": "버튼 색상을 파란색에서 주황색으로 변경하는 실험. 작은 개선이 보이지만 통계적으로 불분명."
+}

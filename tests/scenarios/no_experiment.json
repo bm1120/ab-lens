@@ -1,0 +1,15 @@
+{
+  "metric_name": "매출 (ARPU)",
+  "treatment_value": 0.18,
+  "control_value": 0.15,
+  "p_value": 0.06,
+  "sample_size_treatment": 3000,
+  "sample_size_control": 2800,
+  "experiment_days": 30,
+  "dev_cost_weeks": null,
+  "business_priority": "medium",
+  "prior_expectation": null,
+  "is_random_assignment": false,
+  "multiple_metrics": false,
+  "business_context": "지역별로 서로 다른 가격 정책을 적용한 관찰 연구. 무작위 배정이 불가능하여 지역 단위로 비교함. 교란 변수(계절성, 지역 경제 상황)가 존재할 수 있음."
+}
