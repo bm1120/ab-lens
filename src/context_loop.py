@@ -16,6 +16,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from src.design_schemas import DesignContext
+from src.schemas import ABTestInput, StatisticalResult
 
 
 class ObservedResult(BaseModel):
@@ -28,6 +29,21 @@ class Violation(BaseModel):
     kind: Literal["peeking", "metric_swap", "below_mde"]
     severity: Literal["high", "medium"]
     message: str
+
+
+def build_observed_result(
+    input: ABTestInput, stat: StatisticalResult
+) -> ObservedResult:
+    """기존 탭2 입력/통계결과 → Context Loop 입력으로 매핑.
+
+    effect_size_pp(percentage points, 예 6.0)를 DesignContext.agreed_mde(비율, 0.05)와
+    같은 단위(비율)로 정규화한다(÷100).
+    """
+    return ObservedResult(
+        current_n=input.sample_size_treatment + input.sample_size_control,
+        significant_metric=input.metric_name if stat.is_significant else None,
+        effect=stat.effect_size_pp / 100.0,
+    )
 
 
 def context_loop_guard(

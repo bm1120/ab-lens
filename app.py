@@ -16,6 +16,8 @@ from src.agents.bias_detector import detect_bias
 from src.agents.recommender import recommend
 from src.safety import SessionLimiter
 from src.i18n import get_texts
+from src.design_schemas import DesignContext
+from src.context_loop import build_observed_result, context_loop_guard
 
 # 페이지 설정
 st.set_page_config(
@@ -124,6 +126,45 @@ def render_sidebar() -> tuple[str, str, LLMProvider]:
             st.warning(t["request_limit_warning"])
 
     return api_key, st.session_state.lang, provider
+
+
+def render_context_uploader(lang: str) -> DesignContext | None:
+    """탭1에서 받은 ab-design-context.json 업로드 (선택). Context Loop 입력."""
+    label = (
+        "🔒 설계 컨텍스트(.json) 업로드 — 설계 때의 약속과 대조 (선택)"
+        if lang == "ko"
+        else "🔒 Upload design context (.json) — check against your pre-registered plan (optional)"
+    )
+    up = st.file_uploader(label, type=["json"], key="ctx_upload")
+    if up is None:
+        return None
+    try:
+        ctx = DesignContext.from_json(up.read())
+    except ValueError as e:
+        msg = "설계 컨텍스트를 읽지 못했습니다" if lang == "ko" else "Could not read design context"
+        st.warning(f"{msg}: {e}")
+        return None
+    loaded = "설계 컨텍스트 로드됨" if lang == "ko" else "Design context loaded"
+    st.caption(f"✅ {loaded}: {ctx.sharpened_hypothesis[:50]}…")
+    return ctx
+
+
+def render_context_loop(violations: list, lang: str):
+    """Context Loop 위반 배지 (탭2 최상단). 약속 위반 시 강조."""
+    if not violations:
+        return
+    title = (
+        "🔒 Context Loop — 설계 약속 위반 감지"
+        if lang == "ko"
+        else "🔒 Context Loop — design-plan violations detected"
+    )
+    st.subheader(title)
+    for v in violations:
+        if v.severity == "high":
+            st.error(f"🔴 {v.message}")
+        else:
+            st.warning(f"⚠️ {v.message}")
+    st.divider()
 
 
 def render_input_form(t: dict, limiter: SessionLimiter) -> ABTestInput | None:
@@ -397,6 +438,7 @@ def main():
     with tab_input:
         limiter = SessionLimiter()
 
+        design_context = render_context_uploader(lang)
         ab_input = render_input_form(t, limiter)
 
         if ab_input is not None:
@@ -419,6 +461,15 @@ def main():
                     # Step 1: 통계 분석 (API 없음)
                     with st.status(t["step_stats"]):
                         stats = analyze_stats(ab_input)
+
+                    # Context Loop: 설계 약속 대비 대조 (deterministic, API 없음)
+                    if design_context is not None:
+                        observed = build_observed_result(ab_input, stats)
+                        st.session_state.context_violations = context_loop_guard(
+                            design_context, observed
+                        )
+                    else:
+                        st.session_state.context_violations = []
 
                     # Step 2: 편향 감지
                     with st.status(t["step_bias"]):
@@ -457,6 +508,7 @@ def main():
             brief = st.session_state.brief_output
             t_result = get_texts(brief.lang)
 
+            render_context_loop(st.session_state.get("context_violations", []), brief.lang)
             render_stats(brief.statistical, t_result)
             st.divider()
             render_bias(brief.bias_report, t_result)

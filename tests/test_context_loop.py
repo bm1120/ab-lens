@@ -5,7 +5,13 @@
 """
 import pytest
 
-from src.context_loop import ObservedResult, Violation, context_loop_guard
+from src.context_loop import (
+    ObservedResult,
+    Violation,
+    build_observed_result,
+    context_loop_guard,
+)
+from src.schemas import ABTestInput, StatisticalResult
 from tests.test_design_schemas import make_context
 
 
@@ -69,3 +75,56 @@ def test_no_significant_metric_skips_swap_check():
     # 유의한 지표 없음(None) → 체리피킹 판정 대상 아님
     result = context_loop_guard(ctx, observed(significant_metric=None))
     assert "metric_swap" not in kinds(result)
+
+
+# --- 기존 탭2 입력/통계결과 → ObservedResult 매핑 ---
+
+def _ab_input(metric_name="checkout_conversion", n_t=21500, n_c=21500):
+    return ABTestInput(
+        metric_name=metric_name,
+        treatment_value=0.16,
+        control_value=0.10,
+        p_value=0.01,
+        sample_size_treatment=n_t,
+        sample_size_control=n_c,
+        experiment_days=14,
+    )
+
+
+def _stat(is_significant=True, effect_pp=6.0):
+    return StatisticalResult(
+        effect_size_pp=effect_pp,
+        effect_size_relative_pct=60.0,
+        is_significant=is_significant,
+        power_pct=85.0,
+        srm_detected=False,
+        interpretation="x",
+    )
+
+
+def test_build_observed_sums_sample_sizes():
+    obs = build_observed_result(_ab_input(n_t=21500, n_c=21500), _stat())
+    assert obs.current_n == 43000
+
+
+def test_build_observed_normalizes_effect_to_ratio():
+    # effect_size_pp 6.0(=6%p) → 0.06 비율로 정규화 (agreed_mde 단위와 일치)
+    obs = build_observed_result(_ab_input(), _stat(effect_pp=6.0))
+    assert obs.effect == pytest.approx(0.06)
+
+
+def test_build_observed_significant_sets_metric():
+    obs = build_observed_result(_ab_input(metric_name="checkout_conversion"), _stat(is_significant=True))
+    assert obs.significant_metric == "checkout_conversion"
+
+
+def test_build_observed_not_significant_sets_none():
+    obs = build_observed_result(_ab_input(), _stat(is_significant=False))
+    assert obs.significant_metric is None
+
+
+def test_end_to_end_clean_run_via_mapping():
+    # 약속대로(43000 도달, primary 유의, 효과 6%p > MDE 5%p) → 위반 없음
+    ctx = make_context()
+    obs = build_observed_result(_ab_input(n_t=21500, n_c=21500), _stat(is_significant=True, effect_pp=6.0))
+    assert context_loop_guard(ctx, obs) == []
