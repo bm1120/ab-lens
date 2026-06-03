@@ -16,6 +16,7 @@ from src.design_schemas import (
     DesignContext,
     DesignQuality,
     HypothesisOutput,
+    ServiceContext,
 )
 from src.design_stats import calculate_sample_size
 
@@ -63,6 +64,7 @@ def assemble_design_context(
     hyp: HypothesisOutput,
     bias: BiasScreenResult,
     facts: DesignFacts,
+    service_context: ServiceContext | None = None,
 ) -> DesignContext:
     sample = calculate_sample_size(
         metric_type=facts.metric_type,
@@ -93,6 +95,7 @@ def assemble_design_context(
         design_quality=quality,
         bias_screening_summary=summary,
         alternative_selected=hyp.raw_idea if False else None,
+        service_context=service_context,
     )
 
 

@@ -238,6 +238,7 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                         lang=lang,
                         on_progress=lambda node: status.write(f"✓ {node}"),
                         model=model,
+                        service_context=st.session_state.get('service_context'),
                     )
                     # model이 지정된 경우 전달
                     status.update(label="완료" if ko else "Done", state="complete")
@@ -349,6 +350,7 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                     api_key=api_key, provider=provider, lang=lang,
                     on_progress=lambda node: status.write(f"✓ {node}"),
                     model=model,
+                    service_context=st.session_state.get('service_context'),
                 )
                 status.update(label="완료" if ko else "Done", state="complete")
             st.session_state.hyp_result = result
@@ -627,7 +629,7 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 experiment_duration_days=int(duration),
                 icc=icc_in if icc_in > 0 else None, stop_criteria=stop,
             )
-            ctx = assemble_design_context(hyp, result.bias_screen, facts)
+            ctx = assemble_design_context(hyp, result.bias_screen, facts, service_context=st.session_state.get('service_context'))
             st.session_state.design_context = ctx
             st.session_state.design_doc_md = render_design_doc(ctx, hyp)
         except Exception as e:
