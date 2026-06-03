@@ -41,9 +41,12 @@ OPENROUTER_MODELS: list[str] = [
     "anthropic/claude-opus-4.8",
     "openai/gpt-4.1",
     "openai/gpt-4.1-mini",
-    "openai/gpt-5",
+    "openai/gpt-4.1-nano",
     "openai/gpt-4o",
     "openai/gpt-4o-mini",
+    "openai/o3",
+    "openai/o4-mini",
+    "openai/gpt-5-nano",
     "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
 ]
