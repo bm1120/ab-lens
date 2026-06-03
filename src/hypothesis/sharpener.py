@@ -99,6 +99,7 @@ def sharpen(
     provider: LLMProvider,
     lang: str = "ko",
     mode: Literal["quick", "deep"] = "quick",
+    model: str | None = None,
 ) -> HypothesisOutput:
     # Round 1: 기존 수렴 + 메커니즘 명시
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
@@ -109,6 +110,7 @@ def sharpen(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )
     # LLM 이 raw_idea 를 빠뜨려도 입력값으로 강제 (이월 정합)
     out = out.model_copy(update={"raw_idea": idea})
@@ -123,6 +125,7 @@ def sharpen(
             api_key=api_key,
             provider=provider,
             lang=lang,
+            model=model,
         )
         out = out2.model_copy(update={"raw_idea": idea})
 

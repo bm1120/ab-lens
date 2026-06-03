@@ -45,6 +45,7 @@ def expand(
     api_key: str,
     provider: LLMProvider,
     lang: str = "ko",
+    model: str | None = None,
 ) -> ExpanderOutput:
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
     return call_structured(
@@ -54,4 +55,5 @@ def expand(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )

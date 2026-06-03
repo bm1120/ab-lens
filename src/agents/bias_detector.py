@@ -14,6 +14,7 @@ def detect_bias(
     api_key: str,
     lang: str = "ko",
     provider: LLMProvider = LLMProvider.ANTHROPIC,
+    model: str | None = None,
 ) -> BiasReport:
     """
     LLM을 사용하여 A/B 테스트의 의사결정 편향을 감지합니다.
@@ -28,6 +29,7 @@ def detect_bias(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )
 
     json_data = _extract_json(response_text)

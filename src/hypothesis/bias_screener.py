@@ -42,6 +42,7 @@ def screen_bias(
     api_key: str,
     provider: LLMProvider,
     lang: str = "ko",
+    model: str | None = None,
 ) -> BiasScreenResult:
     out = call_structured(
         prompt=hypothesis_text,
@@ -50,6 +51,7 @@ def screen_bias(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )
     biases = out.biases
     if mode == "quick":

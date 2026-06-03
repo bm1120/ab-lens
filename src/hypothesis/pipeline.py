@@ -35,13 +35,14 @@ def run_hypothesis_pipeline(
     provider: LLMProvider,
     lang: str = "ko",
     on_progress: Optional[Callable[[str], None]] = None,
+    model: str | None = None,
 ) -> PipelineResult:
     def emit(node: str) -> None:
         if on_progress is not None:
             on_progress(node)
 
     # Stage 0: A/B 대상 여부
-    verdict = route_trivial(idea, api_key=api_key, provider=provider, lang=lang)
+    verdict = route_trivial(idea, api_key=api_key, provider=provider, lang=lang, model=model)
     emit("trivial_router")
     if verdict.is_trivial:
         return PipelineResult(trivial=True, trivial_reason=verdict.reason)
@@ -52,16 +53,16 @@ def run_hypothesis_pipeline(
             jtbd_reframe=idea, implicit_assumptions=[], candidate_hypotheses=[idea]
         )
     else:
-        expander_output = expand(idea, api_key=api_key, provider=provider, lang=lang)
+        expander_output = expand(idea, api_key=api_key, provider=provider, lang=lang, model=model)
         emit("expander")
 
     # Stage 2: 수렴 + 메커니즘 명시 (Deep 모드 시 2라운드 DeepCritique 포함)
-    hypothesis = sharpen(idea, expander_output, api_key=api_key, provider=provider, lang=lang, mode=mode)
+    hypothesis = sharpen(idea, expander_output, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model)
     emit("sharpener")
 
     # Stage 2 편향 스크리닝 (Quick 3종 / Deep 7종)
     bias_screen = screen_bias(
-        hypothesis.sharpened_hypothesis, mode=mode, api_key=api_key, provider=provider, lang=lang
+        hypothesis.sharpened_hypothesis, mode=mode, api_key=api_key, provider=provider, lang=lang, model=model
     )
     emit("bias_screener")
 

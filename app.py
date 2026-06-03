@@ -22,6 +22,14 @@ from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
+from src.llm_client import (
+    CLAUDE_CODE_MODELS,
+    ANTHROPIC_MODELS,
+    OPENROUTER_MODELS,
+    CLAUDE_CODE_MODEL_DEFAULT,
+    ANTHROPIC_MODEL_DEFAULT,
+    OPENROUTER_MODEL_DEFAULT,
+)
 
 # 페이지 설정
 st.set_page_config(
@@ -76,8 +84,8 @@ st.markdown(
 )
 
 
-def render_sidebar() -> tuple[str, str, LLMProvider]:
-    """사이드바 렌더링. (api_key, lang, provider) 반환"""
+def render_sidebar() -> tuple[str, str, LLMProvider, str]:
+    """사이드바 렌더링. (api_key, lang, provider, model) 반환"""
     with st.sidebar:
         # 언어 토글
         if "lang" not in st.session_state:
@@ -139,6 +147,26 @@ def render_sidebar() -> tuple[str, str, LLMProvider]:
 
         st.divider()
 
+        # 모델 선택
+        model_options = {
+            LLMProvider.CLAUDE_CODE: CLAUDE_CODE_MODELS,
+            LLMProvider.ANTHROPIC: ANTHROPIC_MODELS,
+            LLMProvider.OPENROUTER: OPENROUTER_MODELS,
+        }[provider]
+        model_defaults = {
+            LLMProvider.CLAUDE_CODE: CLAUDE_CODE_MODEL_DEFAULT,
+            LLMProvider.ANTHROPIC: ANTHROPIC_MODEL_DEFAULT,
+            LLMProvider.OPENROUTER: OPENROUTER_MODEL_DEFAULT,
+        }[provider]
+        model_label = "모델 선택" if lang == "ko" else "Select model"
+        selected_model = st.selectbox(
+            model_label,
+            options=model_options,
+            index=model_options.index(model_defaults),
+        )
+
+        st.divider()
+
         # 요청 카운터 표시
         limiter = SessionLimiter()
         remaining = limiter.remaining_requests
@@ -147,10 +175,10 @@ def render_sidebar() -> tuple[str, str, LLMProvider]:
         if remaining < 3:
             st.warning(t["request_limit_warning"])
 
-    return api_key, st.session_state.lang, provider
+    return api_key, st.session_state.lang, provider, selected_model
 
 
-def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
+def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str | None = None):
     """탭1 — 실험 설계: 아이디어 → 가설 고도화 → 사실수치 → 설계서/json."""
     ko = lang == "ko"
     st.subheader("🧪 실험 설계" if ko else "🧪 Experiment Design")
@@ -195,7 +223,9 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
                         provider=provider,
                         lang=lang,
                         on_progress=lambda node: status.write(f"✓ {node}"),
+                        model=model,
                     )
+                    # model이 지정된 경우 전달
                     status.update(label="완료" if ko else "Done", state="complete")
                 st.session_state["hyp_result_alt"] = alt_result
                 # 설계 컨텍스트 무효화
@@ -233,6 +263,7 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
                     idea, mode=mode, hypothesis_state=state,
                     api_key=api_key, provider=provider, lang=lang,
                     on_progress=lambda node: status.write(f"✓ {node}"),
+                    model=model,
                 )
                 status.update(label="완료" if ko else "Done", state="complete")
             st.session_state.hyp_result = result
@@ -693,7 +724,7 @@ def render_recommendation(rec, t: dict):
 
 
 def main():
-    api_key, lang, provider = render_sidebar()
+    api_key, lang, provider, selected_model = render_sidebar()
     t = get_texts(lang)
 
     # 헤더
@@ -710,7 +741,7 @@ def main():
     )
 
     with tab_design:
-        render_design_tab(api_key, lang, provider)
+        render_design_tab(api_key, lang, provider, model=selected_model)
 
     with tab_input:
         limiter = SessionLimiter()
@@ -756,11 +787,11 @@ def main():
 
                     # Step 2: 편향 감지
                     with st.status(t["step_bias"]):
-                        bias_report = detect_bias(ab_input, stats, api_key, lang, provider)
+                        bias_report = detect_bias(ab_input, stats, api_key, lang, provider, model=selected_model)
 
                     # Step 3: 추천 생성
                     with st.status(t["step_recommend"]):
-                        recommendation = recommend(ab_input, stats, bias_report, api_key, lang, provider)
+                        recommendation = recommend(ab_input, stats, bias_report, api_key, lang, provider, model=selected_model)
 
                     # BriefOutput 조립
                     brief = BriefOutput(
