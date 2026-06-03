@@ -11,28 +11,36 @@ from openai import APIError as OAIAPIError
 
 from src.schemas import LLMProvider
 
-ANTHROPIC_MODEL = "claude-3-5-haiku-20241022"
-CLAUDE_CODE_MODEL = "claude-haiku-4-5-20251001"  # Claude Code 구독으로 접근 가능한 모델
-OPENROUTER_MODEL = "anthropic/claude-sonnet-4-5"
+# 모델 ID는 2026-06-03 실제 검증 기준.
+#  - Claude Code(OAuth)/Anthropic: 하이픈 표기 (claude-sonnet-4-5)
+#  - OpenRouter: 점 표기 (anthropic/claude-sonnet-4.5)
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"     # 구형 3.5(EOL)에서 교체
+CLAUDE_CODE_MODEL = "claude-haiku-4-5-20251001"   # OAuth 200 검증, 기본(빠름/한도 여유)
+OPENROUTER_MODEL = "anthropic/claude-sonnet-4.5"  # OpenRouter 카탈로그 검증
 
 # ── provider별 선택 가능 모델 목록 ────────────────────────────────────────────
+# Claude Code 구독(OAuth): 하이픈 표기. haiku만 200, 상위는 구독 한도에 따라 429 가능(ID는 유효).
 CLAUDE_CODE_MODELS: list[str] = [
     "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-5-20251001",
-    "claude-opus-4-5-20251001",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-5",
+    "claude-opus-4-8",
 ]
+# Anthropic 직접 API 키: 하이픈 표기, 최신 4.x (구형 3.5/3.7 제거)
 ANTHROPIC_MODELS: list[str] = [
-    "claude-3-5-haiku-20241022",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-7-sonnet-20250219",
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
 ]
+# OpenRouter: 점 표기 (카탈로그 /models 검증)
 OPENROUTER_MODELS: list[str] = [
-    "anthropic/claude-sonnet-4-5",
-    "anthropic/claude-haiku-4-5",
-    "anthropic/claude-opus-4-5",
+    "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-haiku-4.5",
+    "anthropic/claude-opus-4.8",
     "openai/gpt-4o",
     "openai/gpt-4o-mini",
-    "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
 ]
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
