@@ -39,8 +39,12 @@ OPENROUTER_MODELS: list[str] = [
     "anthropic/claude-sonnet-4.6",
     "anthropic/claude-haiku-4.5",
     "anthropic/claude-opus-4.8",
+    "openai/gpt-4.1",
+    "openai/gpt-4.1-mini",
+    "openai/gpt-5",
     "openai/gpt-4o",
     "openai/gpt-4o-mini",
+    "google/gemini-2.0-flash-001",
     "meta-llama/llama-3.3-70b-instruct",
 ]
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
