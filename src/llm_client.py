@@ -48,6 +48,11 @@ OPENROUTER_MODELS: list[str] = [
     "openai/o4-mini",
     "openai/gpt-5-nano",
     "google/gemini-2.0-flash-001",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-flash-lite",
+    "google/gemini-2.5-pro",
+    "google/gemini-3-flash-preview",
+    "google/gemini-3-pro-preview",
     "meta-llama/llama-3.3-70b-instruct",
 ]
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
