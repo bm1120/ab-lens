@@ -26,9 +26,9 @@ from src.llm_client import (
     CLAUDE_CODE_MODELS,
     ANTHROPIC_MODELS,
     OPENROUTER_MODELS,
-    CLAUDE_CODE_MODEL_DEFAULT,
-    ANTHROPIC_MODEL_DEFAULT,
-    OPENROUTER_MODEL_DEFAULT,
+    CLAUDE_CODE_MODEL,
+    ANTHROPIC_MODEL,
+    OPENROUTER_MODEL,
 )
 
 # 페이지 설정
@@ -154,9 +154,9 @@ def render_sidebar() -> tuple[str, str, LLMProvider, str]:
             LLMProvider.OPENROUTER: OPENROUTER_MODELS,
         }[provider]
         model_defaults = {
-            LLMProvider.CLAUDE_CODE: CLAUDE_CODE_MODEL_DEFAULT,
-            LLMProvider.ANTHROPIC: ANTHROPIC_MODEL_DEFAULT,
-            LLMProvider.OPENROUTER: OPENROUTER_MODEL_DEFAULT,
+            LLMProvider.CLAUDE_CODE: CLAUDE_CODE_MODEL,
+            LLMProvider.ANTHROPIC: ANTHROPIC_MODEL,
+            LLMProvider.OPENROUTER: OPENROUTER_MODEL,
         }[provider]
         model_label = "모델 선택" if lang == "ko" else "Select model"
         selected_model = st.selectbox(
