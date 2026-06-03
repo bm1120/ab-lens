@@ -15,6 +15,7 @@ def recommend(
     api_key: str,
     lang: str = "ko",
     provider: LLMProvider = LLMProvider.ANTHROPIC,
+    model: str | None = None,
 ) -> Recommendation:
     """
     LLM을 사용하여 A/B 테스트 결과에 대한 비즈니스 추천을 생성합니다.
@@ -29,6 +30,7 @@ def recommend(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )
 
     json_data = _extract_json(response_text)

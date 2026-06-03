@@ -36,6 +36,7 @@ def route_trivial(
     api_key: str,
     provider: LLMProvider,
     lang: str = "ko",
+    model: str | None = None,
 ) -> TrivialVerdict:
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
     return call_structured(
@@ -45,4 +46,5 @@ def route_trivial(
         api_key=api_key,
         provider=provider,
         lang=lang,
+        model=model,
     )
