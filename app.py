@@ -160,6 +160,50 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
         "Refine an idea into a hypothesis and produce a design contract (.json) carried into analysis."
     )
 
+    # ── session_state 초기화 ──────────────────────────────────────────────────
+    if "rerun_count" not in st.session_state:
+        st.session_state["rerun_count"] = 0
+    if "alt_rerun_pending" not in st.session_state:
+        st.session_state["alt_rerun_pending"] = False
+    if "alt_rerun_idea" not in st.session_state:
+        st.session_state["alt_rerun_idea"] = ""
+    if "alt_rerun_mode" not in st.session_state:
+        st.session_state["alt_rerun_mode"] = "quick"
+    if "hyp_result_initial" not in st.session_state:
+        st.session_state["hyp_result_initial"] = None
+    if "hyp_result_alt" not in st.session_state:
+        st.session_state["hyp_result_alt"] = None
+
+    # ── 대안 재실행 트리거 처리 (버튼 클릭 → rerun() 후 이 블록에서 실행) ────
+    if st.session_state["alt_rerun_pending"]:
+        st.session_state["alt_rerun_pending"] = False
+        alt_idea = st.session_state["alt_rerun_idea"]
+        alt_mode = st.session_state["alt_rerun_mode"]
+        if not api_key:
+            st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
+        else:
+            try:
+                with st.status(
+                    "대안 가설 재실행 중…" if ko else "Re-running with alternative hypothesis…",
+                    expanded=True,
+                ) as status:
+                    alt_result = run_hypothesis_pipeline(
+                        alt_idea,
+                        mode=alt_mode,
+                        hypothesis_state="team_agreed",
+                        api_key=api_key,
+                        provider=provider,
+                        lang=lang,
+                        on_progress=lambda node: status.write(f"✓ {node}"),
+                    )
+                    status.update(label="완료" if ko else "Done", state="complete")
+                st.session_state["hyp_result_alt"] = alt_result
+                # 설계 컨텍스트 무효화
+                st.session_state.pop("design_context", None)
+                st.session_state.pop("design_doc_md", None)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+
     idea = st.text_area(
         "실험 아이디어" if ko else "Experiment idea",
         value=st.session_state.get("design_idea", ""),
@@ -193,6 +237,10 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
                 status.update(label="완료" if ko else "Done", state="complete")
             st.session_state.hyp_result = result
             st.session_state.design_idea = idea
+            # 최초 실행 결과 저장 + 재실행 카운터/결과 초기화
+            st.session_state["hyp_result_initial"] = result
+            st.session_state["hyp_result_alt"] = None
+            st.session_state["rerun_count"] = 0
             # 새 고도화 → 이전 설계 컨텍스트 무효화
             st.session_state.pop("design_context", None)
             st.session_state.pop("design_doc_md", None)
@@ -200,7 +248,11 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
             st.error(f"오류: {e}" if ko else f"Error: {e}")
             return
 
-    result = st.session_state.get("hyp_result")
+    # ── 표시할 결과 결정 (대안 재실행 결과 우선, 없으면 최초 결과) ────────────
+    alt_result = st.session_state.get("hyp_result_alt")
+    is_alt_run = alt_result is not None
+    result = alt_result if is_alt_run else st.session_state.get("hyp_result")
+
     if not result:
         return
 
@@ -211,6 +263,11 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
         return
 
     hyp = result.hypothesis
+
+    # 대안 재실행 배지
+    if is_alt_run:
+        st.info("🔄 **(대안 선택 재실행)**" if ko else "🔄 **(Alternative re-run)**")
+
     st.markdown(f"### {'고도화된 가설' if ko else 'Sharpened hypothesis'}")
     st.success(hyp.sharpened_hypothesis)
     st.markdown(f"**{'메커니즘' if ko else 'Mechanism'}**: {hyp.mechanism_path}")
@@ -231,6 +288,58 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider):
             st.markdown("#### ⚠️ 설계 편향 경고 (차단 아님)" if ko else "#### ⚠️ Design bias warnings")
             for b in active:
                 st.warning(f"**{b.bias_type}**: {b.evidence} → {b.counter_measure}")
+
+    # ── 기각된 대안 — 재실행 UI ───────────────────────────────────────────────
+    # 최초 실행 결과의 rejected_alternatives를 기준으로 표시
+    initial_result = st.session_state.get("hyp_result_initial") or result
+    initial_hyp = initial_result.hypothesis if initial_result else None
+    rejected = initial_hyp.rejected_alternatives if initial_hyp else []
+
+    if rejected:
+        st.divider()
+        rerun_count = st.session_state.get("rerun_count", 0)
+        limit_reached = rerun_count >= 1
+
+        with st.expander(
+            "💡 기각된 대안 — 선택하면 이 가설로 재실행합니다"
+            if ko else
+            "💡 Rejected alternatives — click to re-run with this hypothesis",
+            expanded=not is_alt_run,
+        ):
+            if limit_reached:
+                st.warning(
+                    "⚠️ 대안 탐색은 1회까지 가능합니다." if ko
+                    else "⚠️ Alternative exploration is limited to 1 re-run."
+                )
+
+            for idx, r in enumerate(rejected):
+                with st.container():
+                    st.markdown(f"**가설**: {r.hypothesis}")
+                    st.caption(f"기각 이유: {r.rejection_reason}")
+                    btn_label = (
+                        "🔄 이 가설로 재실행" if ko else "🔄 Re-run with this hypothesis"
+                    )
+                    if st.button(
+                        btn_label,
+                        key=f"alt_rerun_btn_{idx}",
+                        disabled=limit_reached,
+                    ):
+                        st.session_state["rerun_count"] = rerun_count + 1
+                        st.session_state["alt_rerun_pending"] = True
+                        st.session_state["alt_rerun_idea"] = r.hypothesis
+                        st.session_state["alt_rerun_mode"] = mode
+                        st.rerun()
+                    st.markdown("---")
+
+        # 최초 실행 결과의 Decision Log (대안 재실행 후에도 항상 표시)
+        if is_alt_run and initial_hyp and initial_hyp.rejected_alternatives:
+            with st.expander(
+                "📋 최초 실행 기각 대안 Decision Log" if ko
+                else "📋 Initial run rejected alternatives Decision Log",
+                expanded=False,
+            ):
+                for r in initial_hyp.rejected_alternatives:
+                    st.markdown(f"- ~~{r.hypothesis}~~ — {r.rejection_reason}")
 
     st.divider()
     st.markdown(f"### {'사실 수치 입력' if ko else 'Factual inputs'} "

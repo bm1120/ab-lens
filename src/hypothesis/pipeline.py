@@ -55,8 +55,8 @@ def run_hypothesis_pipeline(
         expander_output = expand(idea, api_key=api_key, provider=provider, lang=lang)
         emit("expander")
 
-    # Stage 2: 수렴 + 메커니즘 명시
-    hypothesis = sharpen(idea, expander_output, api_key=api_key, provider=provider, lang=lang)
+    # Stage 2: 수렴 + 메커니즘 명시 (Deep 모드 시 2라운드 DeepCritique 포함)
+    hypothesis = sharpen(idea, expander_output, api_key=api_key, provider=provider, lang=lang, mode=mode)
     emit("sharpener")
 
     # Stage 2 편향 스크리닝 (Quick 3종 / Deep 7종)
