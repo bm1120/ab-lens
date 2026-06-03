@@ -34,6 +34,29 @@ SYSTEM_EN = (
 )
 
 
+def _service_context_block(service_context: object, lang: str) -> str:
+    """ServiceContext를 시스템 프롬프트에 주입할 텍스트 블록으로 변환한다."""
+    if lang == "ko":
+        return (
+            "\n\n[서비스 컨텍스트 — 발산 시 반드시 반영]\n"
+            f"서비스명: {service_context.service_name}\n"  # type: ignore[union-attr]
+            f"타깃 사용자: {service_context.target_users}\n"  # type: ignore[union-attr]
+            f"주요 지표: {service_context.primary_metric}\n"  # type: ignore[union-attr]
+            f"현재 베이스라인: {service_context.current_baseline}\n"  # type: ignore[union-attr]
+            f"과거 실험: {service_context.past_experiments}\n"  # type: ignore[union-attr]
+            f"도메인 제약: {service_context.domain_constraints}"  # type: ignore[union-attr]
+        )
+    return (
+        "\n\n[Service Context — must reflect in divergence]\n"
+        f"Service Name: {service_context.service_name}\n"  # type: ignore[union-attr]
+        f"Target Users: {service_context.target_users}\n"  # type: ignore[union-attr]
+        f"Primary Metric: {service_context.primary_metric}\n"  # type: ignore[union-attr]
+        f"Current Baseline: {service_context.current_baseline}\n"  # type: ignore[union-attr]
+        f"Past Experiments: {service_context.past_experiments}\n"  # type: ignore[union-attr]
+        f"Domain Constraints: {service_context.domain_constraints}"  # type: ignore[union-attr]
+    )
+
+
 class ExpanderOutput(BaseModel):
     jtbd_reframe: str
     implicit_assumptions: list[str]
@@ -46,8 +69,11 @@ def expand(
     provider: LLMProvider,
     lang: str = "ko",
     model: str | None = None,
+    service_context: object | None = None,
 ) -> ExpanderOutput:
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
+    if service_context is not None:
+        system = system + _service_context_block(service_context, lang)
     return call_structured(
         prompt=idea,
         system=system,

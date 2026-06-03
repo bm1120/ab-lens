@@ -202,6 +202,20 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
     if "hyp_result_alt" not in st.session_state:
         st.session_state["hyp_result_alt"] = None
 
+    # ── 가설 정제 루프 session_state 초기화 ───────────────────────────────────
+    for key, default in [
+        ('service_context', None),
+        ('ctx_questions', []),
+        ('quality_score', None),
+        ('refinement_round', 0),
+        ('refinement_history', []),
+        ('targeted_questions', []),
+        ('ctx_answers', {}),
+        ('ctx_step', 'idle'),  # idle | collecting | done
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default
+
     # ── 대안 재실행 트리거 처리 (버튼 클릭 → rerun() 후 이 블록에서 실행) ────
     if st.session_state["alt_rerun_pending"]:
         st.session_state["alt_rerun_pending"] = False
@@ -233,6 +247,77 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 st.session_state.pop("design_doc_md", None)
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
+
+    # ── Phase 0: 서비스 컨텍스트 수집 ────────────────────────────────────────
+    if st.session_state['ctx_step'] == 'idle':
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.info('서비스 컨텍스트를 입력하면 더 정확한 가설 고도화가 가능해요.' if ko else 'Adding service context enables more accurate hypothesis refinement.')
+        with col_b:
+            if st.button('컨텍스트 입력' if ko else 'Add Context', key='btn_ctx_start'):
+                st.session_state['ctx_step'] = 'collecting'
+                st.rerun()
+            if st.button('건너뛰기' if ko else 'Skip', key='btn_ctx_skip'):
+                st.session_state['ctx_step'] = 'done'
+                st.rerun()
+
+    elif st.session_state['ctx_step'] == 'collecting':
+        st.subheader('📋 서비스 컨텍스트' if ko else '📋 Service Context')
+        static_questions_ko = [
+            '서비스/제품 이름이 뭔가요?',
+            '주요 사용자 세그먼트는 누구인가요? (예: 20대 직장인, B2B SaaS 구독자)',
+            '북극성 지표(가장 중요한 단일 지표)는 무엇인가요?',
+            '현재 그 지표의 대략적인 수치는? (없으면 "모름" 가능)',
+            '과거에 유사한 실험을 진행한 적 있나요? 결과는? (없으면 "없음")',
+        ]
+        static_questions_en = [
+            'What is the name of your service/product?',
+            'Who are your primary user segments? (e.g., millennials, B2B SaaS subscribers)',
+            'What is your north-star metric (the single most important metric)?',
+            'What is the approximate current value of that metric? ("unknown" is fine)',
+            'Have you run similar experiments before? What were the results? ("none" is fine)',
+        ]
+        questions = static_questions_ko if ko else static_questions_en
+        st.session_state['ctx_questions'] = questions
+
+        for i, q in enumerate(questions):
+            st.session_state['ctx_answers'][i] = st.text_input(q, key=f'ctx_q_{i}', value=st.session_state['ctx_answers'].get(i, ''))
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button('저장' if ko else 'Save', key='btn_ctx_save'):
+                answers = [st.session_state['ctx_answers'].get(i, '') for i in range(len(questions))]
+                from src.design_schemas import ServiceContext
+                ctx = ServiceContext(
+                    service_name=answers[0] or 'Unknown',
+                    target_users=answers[1] or 'Unknown',
+                    primary_metric=answers[2] or 'Unknown',
+                    current_baseline=answers[3] or 'Unknown',
+                    past_experiments=answers[4] or 'None',
+                    domain_constraints='없음' if ko else 'None',
+                )
+                st.session_state['service_context'] = ctx
+                st.session_state['ctx_step'] = 'done'
+                st.rerun()
+        with col2:
+            if st.button('건너뛰기' if ko else 'Skip', key='btn_ctx_skip2'):
+                st.session_state['ctx_step'] = 'done'
+                st.rerun()
+
+    elif st.session_state['ctx_step'] == 'done':
+        ctx = st.session_state.get('service_context')
+        if ctx:
+            with st.expander('✅ 서비스 컨텍스트 저장됨' if ko else '✅ Service context saved', expanded=False):
+                st.write(f'**서비스**: {ctx.service_name}')
+                st.write(f'**대상 유저**: {ctx.target_users}')
+                st.write(f'**북극성 지표**: {ctx.primary_metric}')
+                if st.button('수정' if ko else 'Edit', key='btn_ctx_edit'):
+                    st.session_state['ctx_step'] = 'collecting'
+                    st.rerun()
+        else:
+            st.caption('⚡ 컨텍스트 없이 범용 모드로 진행 중' if ko else '⚡ Running in generic mode (no context)')
+
+    st.divider()
 
     idea = st.text_area(
         "실험 아이디어" if ko else "Experiment idea",
@@ -272,6 +357,11 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             st.session_state["hyp_result_initial"] = result
             st.session_state["hyp_result_alt"] = None
             st.session_state["rerun_count"] = 0
+            # 새 고도화 → 정제 루프 상태 초기화
+            st.session_state['quality_score'] = None
+            st.session_state['refinement_round'] = 0
+            st.session_state['refinement_history'] = []
+            st.session_state['targeted_questions'] = []
             # 새 고도화 → 이전 설계 컨텍스트 무효화
             st.session_state.pop("design_context", None)
             st.session_state.pop("design_doc_md", None)
@@ -371,6 +461,145 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             ):
                 for r in initial_hyp.rejected_alternatives:
                     st.markdown(f"- ~~{r.hypothesis}~~ — {r.rejection_reason}")
+
+    st.divider()
+
+    # ── Phase 3: 가설 품질 스코어카드 ────────────────────────────────────────
+    if result and not result.trivial and result.hypothesis:
+        hyp_scored = result.hypothesis
+        service_ctx = st.session_state.get('service_context')
+
+        # Auto-score on first result or when result changes
+        score = st.session_state.get('quality_score')
+        if score is None:
+            with st.spinner('품질 평가 중...' if ko else 'Scoring hypothesis quality...'):
+                from src.hypothesis.scorer import score_hypothesis
+                score = score_hypothesis(
+                    hypothesis=hyp_scored,
+                    service_context=service_ctx,
+                    api_key=api_key,
+                    provider=provider,
+                    lang=lang,
+                    model=model,
+                )
+                st.session_state['quality_score'] = score
+
+        st.subheader('🎯 가설 품질 스코어카드' if ko else '🎯 Hypothesis Quality Scorecard')
+
+        # Score display
+        st.metric(
+            '종합 점수' if ko else 'Total Score',
+            f'{score.total}/100',
+            delta='통과 ✅' if score.passed else f'미달 ({70 - score.total}점 부족)',
+            delta_color='normal' if score.passed else 'inverse',
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric('명확성' if ko else 'Clarity', f'{score.clarity}/100')
+        c2.metric('메커니즘' if ko else 'Mechanism', f'{score.mechanism}/100')
+        c3.metric('측정가능성' if ko else 'Measurability', f'{score.measurability}/100')
+        c4.metric('편향 안전성' if ko else 'Bias Safety', f'{score.bias_risk}/100')
+
+        st.caption(f'📝 {score.rationale}')
+
+        if not score.passed:
+            st.warning(
+                f'약한 축: {", ".join(score.weak_axes)} — 정제 라운드를 진행하세요.' if ko else
+                f'Weak axes: {", ".join(score.weak_axes)} — run a refinement round.'
+            )
+
+            refinement_round = st.session_state.get('refinement_round', 0)
+            MAX_ROUNDS = 3
+
+            if refinement_round < MAX_ROUNDS:
+                st.caption(
+                    f'정제 라운드 {refinement_round + 1}/{MAX_ROUNDS}' if ko else
+                    f'Refinement round {refinement_round + 1}/{MAX_ROUNDS}'
+                )
+
+                # Phase 4: 소크라테스식 타깃 질문
+                targeted_qs = st.session_state.get('targeted_questions', [])
+                if not targeted_qs:
+                    if st.button('🔍 정제 시작' if ko else '🔍 Start Refinement', key=f'btn_refine_start_{refinement_round}'):
+                        from src.hypothesis.refinement_agent import generate_targeted_questions
+                        with st.spinner('질문 생성 중...' if ko else 'Generating targeted questions...'):
+                            qs = generate_targeted_questions(
+                                weak_axes=score.weak_axes,
+                                hypothesis=hyp_scored,
+                                service_context=service_ctx,
+                                lang=lang,
+                                api_key=api_key,
+                                provider=provider,
+                                model=model,
+                            )
+                        st.session_state['targeted_questions'] = qs
+                        st.rerun()
+                else:
+                    for i, q in enumerate(targeted_qs):
+                        st.chat_message('assistant').write(q)
+                    user_answers = {}
+                    for i, q in enumerate(targeted_qs):
+                        user_answers[i] = st.text_input(
+                            f'답변 {i + 1}' if ko else f'Answer {i + 1}',
+                            key=f'refine_ans_{refinement_round}_{i}',
+                        )
+
+                    if st.button(
+                        '이 답변으로 가설 개선' if ko else 'Refine with these answers',
+                        key=f'btn_refine_apply_{refinement_round}',
+                    ):
+                        from src.hypothesis.refinement_agent import refine_with_answer
+                        from src.hypothesis.pipeline import PipelineResult
+                        updated_hyp = hyp_scored
+                        with st.spinner('가설 개선 중...' if ko else 'Refining hypothesis...'):
+                            for i, axis in enumerate(score.weak_axes[:len(targeted_qs)]):
+                                answer = user_answers.get(i, '')
+                                if answer:
+                                    updated_hyp = refine_with_answer(
+                                        axis=axis,
+                                        user_answer=answer,
+                                        hypothesis=updated_hyp,
+                                        service_context=service_ctx,
+                                        api_key=api_key,
+                                        provider=provider,
+                                        lang=lang,
+                                        model=model,
+                                    )
+                        # 개선된 결과로 업데이트 후 재채점
+                        old_bias = result.bias_screen
+                        st.session_state['hyp_result'] = PipelineResult(
+                            trivial=False,
+                            hypothesis=updated_hyp,
+                            bias_screen=old_bias,
+                        )
+                        history = st.session_state.get('refinement_history', [])
+                        history.append({
+                            'round': refinement_round + 1,
+                            'score': score.total,
+                            'weak_axes': score.weak_axes,
+                        })
+                        st.session_state['refinement_history'] = history
+                        st.session_state['refinement_round'] = refinement_round + 1
+                        st.session_state['quality_score'] = None   # 재채점 트리거
+                        st.session_state['targeted_questions'] = []
+                        st.rerun()
+            else:
+                st.info(
+                    '최대 정제 라운드(3회)에 도달했어요. 현재 가설로 진행하세요.' if ko else
+                    'Maximum refinement rounds (3) reached. Proceed with current hypothesis.'
+                )
+
+            # 정제 히스토리
+            history = st.session_state.get('refinement_history', [])
+            if history:
+                with st.expander('정제 히스토리' if ko else 'Refinement history'):
+                    for h in history:
+                        st.write(f"Round {h['round']}: {h['score']}/100 — 개선 축: {', '.join(h['weak_axes'])}")
+        else:
+            st.success(
+                '✅ 품질 기준 통과! 설계 파라미터를 입력하세요.' if ko else
+                '✅ Quality threshold passed! Enter design parameters below.'
+            )
 
     st.divider()
     st.markdown(f"### {'사실 수치 입력' if ko else 'Factual inputs'} "

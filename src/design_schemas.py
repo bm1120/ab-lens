@@ -13,7 +13,31 @@ from pydantic import BaseModel
 from src.bias_pool import BiasType
 
 # DesignContext 직렬화 호환성 버전. 구조가 바뀌면 올린다.
-SCHEMA_VERSION = "8.0"
+SCHEMA_VERSION = "9.0"
+
+
+class ServiceContext(BaseModel):
+    """서비스 컨텍스트 — 가설 검증 전 수집하는 제품/서비스 배경 정보."""
+
+    service_name: str
+    target_users: str
+    primary_metric: str
+    current_baseline: str
+    past_experiments: str
+    domain_constraints: str
+
+
+class QualityScore(BaseModel):
+    """가설 품질 점수 — 4개 축 + 가중 총점 + 통과 여부."""
+
+    clarity: int        # 0-100
+    mechanism: int      # 0-100
+    measurability: int  # 0-100
+    bias_risk: int      # 0-100 (높을수록 편향 위험 낮음, inverted)
+    total: int          # weighted: clarity*0.2 + mechanism*0.3 + measurability*0.3 + bias_risk*0.2
+    weak_axes: list[str]
+    passed: bool        # total >= 70
+    rationale: str
 
 
 class RejectedAlternative(BaseModel):
@@ -88,6 +112,7 @@ class DesignContext(BaseModel):
     design_quality: DesignQuality
     bias_screening_summary: str          # 탭2 편향 교차 참조용
     alternative_selected: Optional[str] = None
+    service_context: Optional[ServiceContext] = None
 
     def to_json(self) -> str:
         return self.model_dump_json()

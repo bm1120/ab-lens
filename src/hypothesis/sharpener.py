@@ -60,6 +60,29 @@ SYSTEM_DEEP_EN = (
 )
 
 
+def _service_context_block(service_context: object, lang: str) -> str:
+    """ServiceContext를 시스템 프롬프트에 주입할 텍스트 블록으로 변환한다."""
+    if lang == "ko":
+        return (
+            "\n\n[서비스 컨텍스트 — 수렴 시 반드시 반영]\n"
+            f"서비스명: {service_context.service_name}\n"  # type: ignore[union-attr]
+            f"타깃 사용자: {service_context.target_users}\n"  # type: ignore[union-attr]
+            f"주요 지표: {service_context.primary_metric}\n"  # type: ignore[union-attr]
+            f"현재 베이스라인: {service_context.current_baseline}\n"  # type: ignore[union-attr]
+            f"과거 실험: {service_context.past_experiments}\n"  # type: ignore[union-attr]
+            f"도메인 제약: {service_context.domain_constraints}"  # type: ignore[union-attr]
+        )
+    return (
+        "\n\n[Service Context — must reflect in convergence]\n"
+        f"Service Name: {service_context.service_name}\n"  # type: ignore[union-attr]
+        f"Target Users: {service_context.target_users}\n"  # type: ignore[union-attr]
+        f"Primary Metric: {service_context.primary_metric}\n"  # type: ignore[union-attr]
+        f"Current Baseline: {service_context.current_baseline}\n"  # type: ignore[union-attr]
+        f"Past Experiments: {service_context.past_experiments}\n"  # type: ignore[union-attr]
+        f"Domain Constraints: {service_context.domain_constraints}"  # type: ignore[union-attr]
+    )
+
+
 def _build_prompt(idea: str, exp: ExpanderOutput) -> str:
     return (
         f"원 아이디어: {idea}\n"
@@ -100,9 +123,12 @@ def sharpen(
     lang: str = "ko",
     mode: Literal["quick", "deep"] = "quick",
     model: str | None = None,
+    service_context: object | None = None,
 ) -> HypothesisOutput:
     # Round 1: 기존 수렴 + 메커니즘 명시
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
+    if service_context is not None:
+        system = system + _service_context_block(service_context, lang)
     out = call_structured(
         prompt=_build_prompt(idea, expander_output),
         system=system,
@@ -118,6 +144,8 @@ def sharpen(
     if mode == "deep":
         # Round 2: DeepCritique — 1라운드 결과를 적대적으로 재검증
         system_deep = SYSTEM_DEEP_KO if lang == "ko" else SYSTEM_DEEP_EN
+        if service_context is not None:
+            system_deep = system_deep + _service_context_block(service_context, lang)
         out2 = call_structured(
             prompt=_build_deep_critique_prompt(idea, out),
             system=system_deep,

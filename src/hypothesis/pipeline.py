@@ -12,7 +12,7 @@ from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel
 
-from src.design_schemas import BiasScreenResult, HypothesisOutput
+from src.design_schemas import BiasScreenResult, HypothesisOutput, ServiceContext
 from src.hypothesis.bias_screener import screen_bias
 from src.hypothesis.expander import ExpanderOutput, expand
 from src.hypothesis.sharpener import sharpen
@@ -36,6 +36,7 @@ def run_hypothesis_pipeline(
     lang: str = "ko",
     on_progress: Optional[Callable[[str], None]] = None,
     model: str | None = None,
+    service_context: ServiceContext | None = None,
 ) -> PipelineResult:
     def emit(node: str) -> None:
         if on_progress is not None:
@@ -53,11 +54,17 @@ def run_hypothesis_pipeline(
             jtbd_reframe=idea, implicit_assumptions=[], candidate_hypotheses=[idea]
         )
     else:
-        expander_output = expand(idea, api_key=api_key, provider=provider, lang=lang, model=model)
+        expander_output = expand(
+            idea, api_key=api_key, provider=provider, lang=lang, model=model,
+            service_context=service_context,
+        )
         emit("expander")
 
     # Stage 2: 수렴 + 메커니즘 명시 (Deep 모드 시 2라운드 DeepCritique 포함)
-    hypothesis = sharpen(idea, expander_output, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model)
+    hypothesis = sharpen(
+        idea, expander_output, api_key=api_key, provider=provider, lang=lang,
+        mode=mode, model=model, service_context=service_context,
+    )
     emit("sharpener")
 
     # Stage 2 편향 스크리닝 (Quick 3종 / Deep 7종)
