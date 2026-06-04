@@ -260,6 +260,65 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
     )
     st.session_state["use_quality_loop"] = use_loop
 
+    # ── T2: 도메인 맥락(선택). 멀티턴일 때만 — 비우면 부족 시 질문 ──
+    domain_in: dict[str, str] = {}
+    if use_loop:
+        with st.expander("도메인/서비스 맥락 (선택 — 비우면 부족 시 질문)" if ko
+                         else "Domain/service context (optional — asked if missing)"):
+            saved = st.session_state.get("domain_ctx", {})
+            domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", saved.get("service_type", ""))
+            domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", saved.get("user_segment", ""))
+            domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", saved.get("primary_goal", ""))
+            domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", saved.get("constraints", ""))
+            st.session_state["domain_ctx"] = domain_in
+
+    def _store(result, used_idea):
+        st.session_state.hyp_result = result
+        st.session_state.design_idea = used_idea
+        st.session_state["hyp_result_initial"] = result
+        st.session_state["hyp_result_alt"] = None
+        st.session_state["rerun_count"] = 0
+        st.session_state.pop("design_context", None)
+        st.session_state.pop("design_doc_md", None)
+
+    def _run_loop(used_idea, used_mode, used_state, domain_str):
+        with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
+            result = run_quality_loop(
+                used_idea, mode=used_mode, hypothesis_state=used_state,
+                api_key=api_key, provider=provider, lang=lang, model=model,
+                domain=domain_str or None,
+                on_progress=lambda node: status.write(f"✓ {node}"),
+            )
+            status.update(label="완료" if ko else "Done", state="complete")
+        _store(result, used_idea)
+
+    # ── 도메인 질문 대기 상태: 질문 폼 ──
+    pend = st.session_state.get("domain_pending")
+    if pend:
+        from src.hypothesis.domain_intake import DomainContext, DomainQuestion, context_from_answers
+        st.info("ℹ️ 도메인 정보가 부족합니다. 답하면 더 정확히 고도화됩니다." if ko
+                else "ℹ️ Domain context is thin. Answer for sharper refinement.")
+        ans = {q["field"]: st.text_input(q["question"], key=f"dq_{i}_{q['field']}")
+               for i, q in enumerate(pend["questions"])}
+        ca, cb = st.columns(2)
+        go = ca.button("답변 반영하고 고도화" if ko else "Refine with answers", type="primary")
+        skip = cb.button("질문 건너뛰고 진행" if ko else "Skip & proceed")
+        if go or skip:
+            base = DomainContext(**pend["inferred"])
+            ctx = base if skip else context_from_answers(
+                [DomainQuestion(**q) for q in pend["questions"]], ans, base=base)
+            err = None
+            try:
+                _run_loop(pend["idea"], pend["mode"], pend["state"], ctx.to_prompt(lang))
+            except Exception as e:
+                err = e
+            if err:
+                st.error(f"오류: {err}" if ko else f"Error: {err}")
+            else:
+                st.session_state.pop("domain_pending", None)
+                st.rerun()
+        return
+
     if st.button("가설 고도화" if ko else "Refine hypothesis", type="primary"):
         if not api_key:
             st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
@@ -267,28 +326,42 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         if not idea.strip():
             st.error("아이디어를 입력하세요." if ko else "Please enter an idea.")
             return
-        try:
-            with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
-                runner = run_quality_loop if use_loop else run_hypothesis_pipeline
-                result = runner(
-                    idea, mode=mode, hypothesis_state=state,
-                    api_key=api_key, provider=provider, lang=lang,
-                    on_progress=lambda node: status.write(f"✓ {node}"),
-                    model=model,
-                )
-                status.update(label="완료" if ko else "Done", state="complete")
-            st.session_state.hyp_result = result
-            st.session_state.design_idea = idea
-            # 최초 실행 결과 저장 + 재실행 카운터/결과 초기화
-            st.session_state["hyp_result_initial"] = result
-            st.session_state["hyp_result_alt"] = None
-            st.session_state["rerun_count"] = 0
-            # 새 고도화 → 이전 설계 컨텍스트 무효화
-            st.session_state.pop("design_context", None)
-            st.session_state.pop("design_doc_md", None)
-        except Exception as e:
-            st.error(f"오류: {e}" if ko else f"Error: {e}")
-            return
+        if use_loop:
+            from src.hypothesis.domain_intake import DomainContext, analyze_domain
+            existing = DomainContext(**domain_in)
+            try:
+                with st.spinner("도메인 점검 중…" if ko else "Checking domain…"):
+                    intake = analyze_domain(idea, existing, api_key=api_key, provider=provider, lang=lang, model=model)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+            if (not intake.sufficient) and intake.questions and (not existing.filled()):
+                st.session_state["domain_pending"] = {
+                    "idea": idea, "mode": mode, "state": state,
+                    "questions": [q.model_dump() for q in intake.questions],
+                    "inferred": intake.inferred.model_dump(),
+                }
+                st.rerun()
+            else:
+                domain_str = (existing if existing.filled() else intake.inferred).to_prompt(lang)
+                try:
+                    _run_loop(idea, mode, state, domain_str)
+                except Exception as e:
+                    st.error(f"오류: {e}" if ko else f"Error: {e}")
+                    return
+        else:
+            try:
+                with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
+                    result = run_hypothesis_pipeline(
+                        idea, mode=mode, hypothesis_state=state,
+                        api_key=api_key, provider=provider, lang=lang,
+                        on_progress=lambda node: status.write(f"✓ {node}"), model=model,
+                    )
+                    status.update(label="완료" if ko else "Done", state="complete")
+                _store(result, idea)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
 
     # ── 표시할 결과 결정 (대안 재실행 결과 우선, 없으면 최초 결과) ────────────
     alt_result = st.session_state.get("hyp_result_alt")

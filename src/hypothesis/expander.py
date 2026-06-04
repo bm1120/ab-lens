@@ -46,10 +46,12 @@ def expand(
     provider: LLMProvider,
     lang: str = "ko",
     model: str | None = None,
+    domain: str | None = None,
 ) -> ExpanderOutput:
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
+    prompt = f"{domain}\n\n아이디어: {idea}" if domain else idea
     return call_structured(
-        prompt=idea,
+        prompt=prompt,
         system=system,
         schema=ExpanderOutput,
         api_key=api_key,

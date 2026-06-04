@@ -63,6 +63,7 @@ def run_quality_loop(
     provider: LLMProvider,
     lang: str = "ko",
     model: Optional[str] = None,
+    domain: Optional[str] = None,
     on_progress: Optional[Callable[[str], None]] = None,
     # 테스트 주입용 (실제 LLM 호출 대체)
     _sharpen: Optional[Callable] = None,
@@ -85,7 +86,7 @@ def run_quality_loop(
     if hypothesis_state == "team_agreed":
         exp = ExpanderOutput(jtbd_reframe=idea, implicit_assumptions=[], candidate_hypotheses=[idea])
     else:
-        exp = expand_fn(idea, api_key=api_key, provider=provider, lang=lang, model=model)
+        exp = expand_fn(idea, api_key=api_key, provider=provider, lang=lang, model=model, domain=domain)
         emit("expander")
 
     pairs: list[tuple[HypothesisOutput, ScorecardResult]] = []
@@ -98,7 +99,7 @@ def run_quality_loop(
             turn = len(pairs) + 1
             hyp = sharpen_fn(
                 idea, exp, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model,
-                refinement=refinement, prev_hypothesis=prev,
+                refinement=refinement, prev_hypothesis=prev, domain=domain,
             )
             emit(f"sharpener#{turn}")
             judgment = judge_fn(hyp, api_key=api_key, provider=provider, lang=lang, model=model)

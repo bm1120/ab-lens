@@ -65,9 +65,11 @@ def _build_prompt(
     exp: ExpanderOutput,
     refinement: dict | None = None,
     prev: HypothesisOutput | None = None,
+    domain: str | None = None,
 ) -> str:
     base = (
-        f"원 아이디어: {idea}\n"
+        (f"{domain}\n\n" if domain else "")
+        + f"원 아이디어: {idea}\n"
         f"JTBD: {exp.jtbd_reframe}\n"
         f"암묵적 전제: {exp.implicit_assumptions}\n"
         f"발산된 후보:\n" + "\n".join(f"- {c}" for c in exp.candidate_hypotheses)
@@ -117,11 +119,12 @@ def sharpen(
     model: str | None = None,
     refinement: dict | None = None,
     prev_hypothesis: HypothesisOutput | None = None,
+    domain: str | None = None,
 ) -> HypothesisOutput:
     # Round 1: 기존 수렴 + 메커니즘 명시 (refinement 있으면 이전 가설 재고도화 — T3 루프)
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
     out = call_structured(
-        prompt=_build_prompt(idea, expander_output, refinement, prev_hypothesis),
+        prompt=_build_prompt(idea, expander_output, refinement, prev_hypothesis, domain),
         system=system,
         schema=HypothesisOutput,
         api_key=api_key,
