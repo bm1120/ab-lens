@@ -20,6 +20,7 @@ from src.config import get_credential
 from src.design_schemas import DesignContext
 from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
+from src.hypothesis.quality_loop import run_quality_loop
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
 from src.llm_client import (
@@ -250,6 +251,15 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         if ko else {"initial_idea": "Initial idea", "team_agreed": "Team-agreed"}[s],
     )
 
+    use_loop = st.checkbox(
+        "멀티턴 고도화 (가설품질 스코어카드 게이트까지 반복)" if ko
+        else "Multi-turn refinement (loop until quality scorecard gate)",
+        value=st.session_state.get("use_quality_loop", False),
+        help="측정·반증 게이트와 6차원 품질을 만족할 때까지 자동 재고도화. Codex·Gemini 룰가이드 판정 사용."
+        if ko else "Auto-refine until the measurability/falsifiability gate + 6-dim quality pass.",
+    )
+    st.session_state["use_quality_loop"] = use_loop
+
     if st.button("가설 고도화" if ko else "Refine hypothesis", type="primary"):
         if not api_key:
             st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
@@ -259,7 +269,8 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             return
         try:
             with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
-                result = run_hypothesis_pipeline(
+                runner = run_quality_loop if use_loop else run_hypothesis_pipeline
+                result = runner(
                     idea, mode=mode, hypothesis_state=state,
                     api_key=api_key, provider=provider, lang=lang,
                     on_progress=lambda node: status.write(f"✓ {node}"),
@@ -294,6 +305,32 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         return
 
     hyp = result.hypothesis
+
+    # ── 멀티턴 루프 결과: 가설품질 스코어카드 요약 (run_quality_loop일 때만) ──
+    sc = getattr(result, "scorecard", None)
+    if sc is not None:
+        emoji = {"PASS": "✅", "ACCEPTABLE_CAVEAT": "🟡", "REFINE": "🔁", "REDESIGN": "🔴"}.get(sc.grade, "")
+        turns = getattr(result, "turns", 1)
+        best_turn = getattr(result, "best_turn", 1)
+        st.markdown((f"#### {emoji} 가설품질 {sc.grade} · {turns}턴 (채택 {best_turn}턴)") if ko
+                    else f"#### {emoji} Quality {sc.grade} · {turns} turns (picked #{best_turn})")
+        gate_txt = ("통과" if sc.gate_passed else "결격") if ko else ("pass" if sc.gate_passed else "fail")
+        st.caption((f"게이트(측정·반증): {gate_txt} · 총점 {sc.total}/100 · 종료: {result.stop_reason}") if ko
+                   else f"Gate(measure·falsify): {gate_txt} · {sc.total}/100 · stop: {result.stop_reason}")
+        if sc.scores:
+            for col, (d, ds) in zip(st.columns(len(sc.scores)), sc.scores.items()):
+                col.metric(d, f"{ds.score}/{ds.max}", "✓" if ds.passed else "✗",
+                           delta_color="normal" if ds.passed else "inverse")
+        if sc.caveats:
+            st.warning("⚠️ " + " / ".join(sc.caveats))
+        with st.expander((f"턴별 이력 ({turns})") if ko else f"Per-turn history ({turns})"):
+            for h in getattr(result, "history", []):
+                mark = "⭐" if h.turn == best_turn else "▫️"
+                st.write(f"{mark} {'턴' if ko else 'turn '}{h.turn}: **{h.grade}** · "
+                         f"{'총점' if ko else 'score'} {h.total} · "
+                         f"{'게이트' if ko else 'gate'} {'O' if h.gate_passed else 'X'}"
+                         + (f" · {'미달' if ko else 'failed'} {h.failed_set}" if h.failed_set else ""))
+        st.divider()
 
     # 대안 재실행 배지
     if is_alt_run:
