@@ -20,6 +20,7 @@ from src.config import get_credential
 from src.design_schemas import DesignContext
 from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
+from src.hypothesis.quality_loop import run_quality_loop
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
 from src.llm_client import (
@@ -250,6 +251,70 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         if ko else {"initial_idea": "Initial idea", "team_agreed": "Team-agreed"}[s],
     )
 
+    use_loop = st.checkbox(
+        "멀티턴 고도화 (가설품질 스코어카드 게이트까지 반복)" if ko
+        else "Multi-turn refinement (loop until quality scorecard gate)",
+        value=st.session_state.get("use_quality_loop", False),
+        help="측정·반증 게이트와 6차원 품질을 만족할 때까지 자동 재고도화. Codex·Gemini 룰가이드 판정 사용."
+        if ko else "Auto-refine until the measurability/falsifiability gate + 6-dim quality pass.",
+    )
+    st.session_state["use_quality_loop"] = use_loop
+
+    # ── T2: 도메인 맥락(선택). 멀티턴일 때만 — 비우면 부족 시 질문 ──
+    domain_in: dict[str, str] = {}
+    if use_loop:
+        with st.expander("도메인/서비스 맥락 (선택 — 비우면 부족 시 질문)" if ko
+                         else "Domain/service context (optional — asked if missing)"):
+            domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", key="dom_service_type")
+            domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", key="dom_user_segment")
+            domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", key="dom_primary_goal")
+            domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", key="dom_constraints")
+
+    def _store(result, used_idea):
+        st.session_state.hyp_result = result
+        st.session_state.design_idea = used_idea
+        st.session_state["hyp_result_initial"] = result
+        st.session_state["hyp_result_alt"] = None
+        st.session_state["rerun_count"] = 0
+        st.session_state.pop("design_context", None)
+        st.session_state.pop("design_doc_md", None)
+
+    def _run_loop(used_idea, used_mode, used_state, domain_str):
+        with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
+            result = run_quality_loop(
+                used_idea, mode=used_mode, hypothesis_state=used_state,
+                api_key=api_key, provider=provider, lang=lang, model=model,
+                domain=domain_str or None,
+                on_progress=lambda node: status.write(f"✓ {node}"),
+            )
+            status.update(label="완료" if ko else "Done", state="complete")
+        _store(result, used_idea)
+
+    # ── 도메인 질문 대기 상태: 질문 폼 ──
+    pend = st.session_state.get("domain_pending")
+    if pend:
+        from src.hypothesis.domain_intake import DomainContext, DomainQuestion, context_from_answers
+        st.info("ℹ️ 도메인 정보가 부족합니다. 답하면 더 정확히 고도화됩니다." if ko
+                else "ℹ️ Domain context is thin. Answer for sharper refinement.")
+        rnd = pend.get("round", 0)        # 라운드 nonce → 위젯 key 충돌/고스트 답변 방지
+        ans = {q["field"]: st.text_input(q["question"], key=f"dq_{rnd}_{i}_{q['field']}")
+               for i, q in enumerate(pend["questions"])}
+        ca, cb = st.columns(2)
+        go = ca.button("답변 반영하고 고도화" if ko else "Refine with answers", type="primary")
+        skip = cb.button("질문 건너뛰고 진행" if ko else "Skip & proceed")
+        if go or skip:
+            base = DomainContext(**pend["inferred"])
+            ctx = base if skip else context_from_answers(
+                [DomainQuestion(**q) for q in pend["questions"]], ans, base=base)
+            st.session_state.pop("domain_pending", None)   # 항상 정리 — 실패해도 폼에 갇히지 않게
+            try:
+                _run_loop(pend["idea"], pend["mode"], pend["state"], ctx.to_prompt(lang))
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+            st.rerun()
+        return
+
     if st.button("가설 고도화" if ko else "Refine hypothesis", type="primary"):
         if not api_key:
             st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
@@ -257,27 +322,48 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         if not idea.strip():
             st.error("아이디어를 입력하세요." if ko else "Please enter an idea.")
             return
-        try:
-            with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
-                result = run_hypothesis_pipeline(
-                    idea, mode=mode, hypothesis_state=state,
-                    api_key=api_key, provider=provider, lang=lang,
-                    on_progress=lambda node: status.write(f"✓ {node}"),
-                    model=model,
-                )
-                status.update(label="완료" if ko else "Done", state="complete")
-            st.session_state.hyp_result = result
-            st.session_state.design_idea = idea
-            # 최초 실행 결과 저장 + 재실행 카운터/결과 초기화
-            st.session_state["hyp_result_initial"] = result
-            st.session_state["hyp_result_alt"] = None
-            st.session_state["rerun_count"] = 0
-            # 새 고도화 → 이전 설계 컨텍스트 무효화
-            st.session_state.pop("design_context", None)
-            st.session_state.pop("design_doc_md", None)
-        except Exception as e:
-            st.error(f"오류: {e}" if ko else f"Error: {e}")
-            return
+        if use_loop:
+            from src.hypothesis.domain_intake import DomainContext, analyze_domain
+            existing = DomainContext(**domain_in)
+            try:
+                with st.spinner("도메인 점검 중…" if ko else "Checking domain…"):
+                    intake = analyze_domain(idea, existing, api_key=api_key, provider=provider, lang=lang, model=model)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+            merged = existing.merged_with(intake.inferred)   # 사용자 입력 우선, 빈 칸은 추론으로
+            # 병합 후에도 비어있는 필드에 대한 질문만 남김 (이미 답한 건 안 물음)
+            ask_fields = merged.missing_fields() | {"other"}
+            qs = [q for q in intake.questions if q.field in ask_fields]
+            if (not intake.sufficient) and qs:
+                rnd = st.session_state.get("domain_round", 0) + 1
+                st.session_state["domain_round"] = rnd
+                st.session_state["domain_pending"] = {
+                    "idea": idea, "mode": mode, "state": state,
+                    "questions": [q.model_dump() for q in qs],
+                    "inferred": merged.model_dump(),     # 병합본을 답변 base로
+                    "round": rnd,
+                }
+                st.rerun()
+            else:
+                try:
+                    _run_loop(idea, mode, state, merged.to_prompt(lang))
+                except Exception as e:
+                    st.error(f"오류: {e}" if ko else f"Error: {e}")
+                    return
+        else:
+            try:
+                with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
+                    result = run_hypothesis_pipeline(
+                        idea, mode=mode, hypothesis_state=state,
+                        api_key=api_key, provider=provider, lang=lang,
+                        on_progress=lambda node: status.write(f"✓ {node}"), model=model,
+                    )
+                    status.update(label="완료" if ko else "Done", state="complete")
+                _store(result, idea)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
 
     # ── 표시할 결과 결정 (대안 재실행 결과 우선, 없으면 최초 결과) ────────────
     alt_result = st.session_state.get("hyp_result_alt")
@@ -294,6 +380,60 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         return
 
     hyp = result.hypothesis
+
+    # ── 멀티턴 루프 결과: 가설품질 스코어카드 요약 (run_quality_loop일 때만) ──
+    sc = getattr(result, "scorecard", None)
+    if sc is not None:
+        # 내부 enum → 사용자 친화 라벨 (로직/스키마는 enum 유지)
+        GRADE = {
+            "PASS": ("✅ 통과 — 실험 진행 가능", "✅ Pass — ready to run"),
+            "ACCEPTABLE_CAVEAT": ("🟡 조건부 통과 — 보완점 있으나 진행 가능", "🟡 Acceptable — minor gaps, can proceed"),
+            "REFINE": ("🔁 보강 필요 — 더 다듬어야 함", "🔁 Needs work — refine further"),
+            "REDESIGN": ("🔴 재설계 필요 — 측정/반증 불가", "🔴 Redesign — not measurable/falsifiable"),
+        }
+        DIM = {"ko": {"D1": "측정가능성", "D2": "반증가능성", "D3": "인과메커니즘",
+                      "D4": "정렬·리스크", "D5": "대안탐색", "D6": "명료성"},
+               "en": {"D1": "Measurable", "D2": "Falsifiable", "D3": "Mechanism",
+                      "D4": "Align·Risk", "D5": "Alternatives", "D6": "Clarity"}}[lang if lang in ("ko", "en") else "ko"]
+
+        def _stop(r: str) -> str:
+            if "REDESIGN" in r or "결격" in r:
+                return "측정·반증 게이트 미충족" if ko else "gate not met"
+            if "max_turns" in r or "hard_limit" in r:
+                return "최대 반복 도달 — 최선안 채택" if ko else "max rounds — best kept"
+            if "stall" in r:
+                return "더 개선되지 않음 — 최선안 채택" if ko else "no further improvement — best kept"
+            if r == "pass":
+                return "품질 통과" if ko else "passed"
+            return r
+
+        turns = getattr(result, "turns", 1)
+        best_turn = getattr(result, "best_turn", 1)
+        glabel = GRADE.get(sc.grade, (sc.grade, sc.grade))[0 if ko else 1]
+        st.markdown(f"#### {glabel}")
+        st.caption((f"{turns}회 고도화 (채택 {best_turn}회차) · 게이트(측정·반증) {'충족' if sc.gate_passed else '미충족'} · "
+                    f"품질점수 {sc.total}/100 · {_stop(result.stop_reason)}") if ko
+                   else f"{turns} rounds (picked #{best_turn}) · gate {'met' if sc.gate_passed else 'unmet'} · "
+                        f"score {sc.total}/100 · {_stop(result.stop_reason)}")
+        if sc.scores:
+            for col, (d, ds) in zip(st.columns(len(sc.scores)), sc.scores.items()):
+                delta = ("충족" if ds.passed else "미달") if ko else ("ok" if ds.passed else "low")
+                col.metric(DIM.get(d, d), f"{ds.score}/{ds.max}", delta,
+                           delta_color="normal" if ds.passed else "inverse")
+        if sc.caveats:
+            named = []
+            for c in sc.caveats:
+                key, _, rest = c.partition(":")
+                named.append(f"{DIM.get(key.strip(), key.strip())}:{rest}" if rest else c)
+            st.warning(("⚠️ 보완점 — " if ko else "⚠️ Caveats — ") + " / ".join(named))
+        with st.expander((f"고도화 과정 ({turns}회)") if ko else f"Refinement history ({turns})"):
+            for h in getattr(result, "history", []):
+                mark = "⭐" if h.turn == best_turn else "▫️"
+                hg = GRADE.get(h.grade, (h.grade, h.grade))[0 if ko else 1]
+                gaps = ", ".join(DIM.get(x, x) for x in h.failed_set)
+                st.write(f"{mark} {h.turn}{'회차' if ko else ''}: {hg} · {'품질' if ko else 'score'} {h.total}"
+                         + (f" · {'미보완' if ko else 'gaps'} {gaps}" if gaps else ""))
+        st.divider()
 
     # 대안 재실행 배지
     if is_alt_run:
