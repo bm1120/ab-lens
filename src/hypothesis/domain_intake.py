@@ -21,20 +21,38 @@ _LABELS = {
 }
 
 
+def _san(v: str) -> str:
+    """프롬프트 인젝션·포맷깨짐 방어: 개행 제거 + 길이 제한."""
+    return " ".join(str(v or "").split())[:300]
+
+
 class DomainContext(BaseModel):
     service_type: str = ""
     user_segment: str = ""
     primary_goal: str = ""
     constraints: str = ""
+    other_info: str = ""                 # 기타 참고(경쟁사·과거사례 등) — constraints와 분리
+
+    _FIELDS = ("service_type", "user_segment", "primary_goal", "constraints")
 
     def filled(self) -> bool:
-        return any([self.service_type, self.user_segment, self.primary_goal, self.constraints])
+        return any(getattr(self, f) for f in self._FIELDS) or bool(self.other_info)
+
+    def missing_fields(self) -> set[str]:
+        return {f for f in self._FIELDS if not getattr(self, f)}
+
+    def merged_with(self, other: "DomainContext") -> "DomainContext":
+        """self가 우선, 빈 필드는 other(추론값)로 채움."""
+        return DomainContext(**{f: (getattr(self, f) or getattr(other, f))
+                                for f in self._FIELDS + ("other_info",)})
 
     def to_prompt(self, lang: str = "ko") -> str:
         lab = _LABELS.get(lang, _LABELS["ko"])
-        rows = [f"- {lab[k]}: {v}" for k, v in
+        rows = [f"- {lab[k]}: {_san(v)}" for k, v in
                 (("service_type", self.service_type), ("user_segment", self.user_segment),
                  ("primary_goal", self.primary_goal), ("constraints", self.constraints)) if v]
+        if self.other_info:
+            rows.append(("- 기타 참고: " if lang == "ko" else "- Other notes: ") + _san(self.other_info))
         if not rows:
             return ""
         head = "[도메인 맥락]" if lang == "ko" else "[Domain context]"
@@ -53,14 +71,14 @@ class DomainIntake(BaseModel):
 
 
 _SYSTEM = {
-    "ko": ("너는 A/B 테스트 가설 고도화를 돕는 도메인 인테이크다. 아이디어에 가설을 날카롭게 만들기 위한 "
-           "도메인 맥락(서비스 유형·타겟 사용자·핵심 비즈니스 목표/지표·제약)이 **충분한지** 판정한다. "
-           "충분하면 sufficient=true로 두고 inferred를 아이디어 근거로 채운다. 부족하면 sufficient=false + "
-           "**부족한 필드만** 묻는 질문을 최대 3개(각 한 문장, 사용자가 바로 답할 수 있게). 추측으로 메우지 마라."),
-    "en": ("You are a domain intake for A/B test hypothesis refinement. Decide whether the idea has **enough** "
-           "domain context (service type, target users, primary business goal/metric, constraints) to sharpen a "
-           "hypothesis. If enough, sufficient=true and fill inferred from the idea. If not, sufficient=false and ask "
-           "up to 3 one-sentence questions for the **missing fields only**. Do not fabricate."),
+    "ko": ("너는 A/B 테스트 가설 고도화를 돕는 도메인 인테이크다. 아이디어에서 도메인 맥락"
+           "(서비스 유형·타겟 사용자·핵심 비즈니스 목표/지표·제약)을 **합리적으로 추론해 inferred를 최대한 채워라.** "
+           "추론으로 충분하면 sufficient=true. **추론조차 불가능해 A/B 설계를 진행할 수 없는 치명적 누락이 있을 때만** "
+           "sufficient=false로 하고, 그 누락 필드만 묻는 질문을 **최대 2개**(각 한 문장) 생성한다. 사소한 보강 질문으로 사용자를 귀찮게 하지 마라."),
+    "en": ("You are a domain intake for A/B test hypothesis refinement. **Infer the domain context** "
+           "(service type, target users, primary goal/metric, constraints) from the idea and fill `inferred` as much as possible. "
+           "If inference suffices, sufficient=true. **Only when a critical gap makes A/B design impossible even after inference**, "
+           "set sufficient=false and ask **at most 2** one-sentence questions for those gaps. Do not nag with minor clarifications."),
 }
 
 
@@ -99,7 +117,7 @@ def context_from_answers(questions: list[DomainQuestion], answers: dict[str, str
         if not a:
             continue
         if q.field == "other":
-            ctx.constraints = (ctx.constraints + " / " + a).strip(" /")
+            ctx.other_info = (ctx.other_info + " / " + a).strip(" /")
         else:
             setattr(ctx, q.field, a)
     return ctx

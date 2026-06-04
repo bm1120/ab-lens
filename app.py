@@ -265,12 +265,10 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
     if use_loop:
         with st.expander("도메인/서비스 맥락 (선택 — 비우면 부족 시 질문)" if ko
                          else "Domain/service context (optional — asked if missing)"):
-            saved = st.session_state.get("domain_ctx", {})
-            domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", saved.get("service_type", ""))
-            domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", saved.get("user_segment", ""))
-            domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", saved.get("primary_goal", ""))
-            domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", saved.get("constraints", ""))
-            st.session_state["domain_ctx"] = domain_in
+            domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", key="dom_service_type")
+            domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", key="dom_user_segment")
+            domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", key="dom_primary_goal")
+            domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", key="dom_constraints")
 
     def _store(result, used_idea):
         st.session_state.hyp_result = result
@@ -298,7 +296,8 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         from src.hypothesis.domain_intake import DomainContext, DomainQuestion, context_from_answers
         st.info("ℹ️ 도메인 정보가 부족합니다. 답하면 더 정확히 고도화됩니다." if ko
                 else "ℹ️ Domain context is thin. Answer for sharper refinement.")
-        ans = {q["field"]: st.text_input(q["question"], key=f"dq_{i}_{q['field']}")
+        rnd = pend.get("round", 0)        # 라운드 nonce → 위젯 key 충돌/고스트 답변 방지
+        ans = {q["field"]: st.text_input(q["question"], key=f"dq_{rnd}_{i}_{q['field']}")
                for i, q in enumerate(pend["questions"])}
         ca, cb = st.columns(2)
         go = ca.button("답변 반영하고 고도화" if ko else "Refine with answers", type="primary")
@@ -307,16 +306,13 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             base = DomainContext(**pend["inferred"])
             ctx = base if skip else context_from_answers(
                 [DomainQuestion(**q) for q in pend["questions"]], ans, base=base)
-            err = None
+            st.session_state.pop("domain_pending", None)   # 항상 정리 — 실패해도 폼에 갇히지 않게
             try:
                 _run_loop(pend["idea"], pend["mode"], pend["state"], ctx.to_prompt(lang))
             except Exception as e:
-                err = e
-            if err:
-                st.error(f"오류: {err}" if ko else f"Error: {err}")
-            else:
-                st.session_state.pop("domain_pending", None)
-                st.rerun()
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+            st.rerun()
         return
 
     if st.button("가설 고도화" if ko else "Refine hypothesis", type="primary"):
@@ -335,17 +331,23 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
                 return
-            if (not intake.sufficient) and intake.questions and (not existing.filled()):
+            merged = existing.merged_with(intake.inferred)   # 사용자 입력 우선, 빈 칸은 추론으로
+            # 병합 후에도 비어있는 필드에 대한 질문만 남김 (이미 답한 건 안 물음)
+            ask_fields = merged.missing_fields() | {"other"}
+            qs = [q for q in intake.questions if q.field in ask_fields]
+            if (not intake.sufficient) and qs:
+                rnd = st.session_state.get("domain_round", 0) + 1
+                st.session_state["domain_round"] = rnd
                 st.session_state["domain_pending"] = {
                     "idea": idea, "mode": mode, "state": state,
-                    "questions": [q.model_dump() for q in intake.questions],
-                    "inferred": intake.inferred.model_dump(),
+                    "questions": [q.model_dump() for q in qs],
+                    "inferred": merged.model_dump(),     # 병합본을 답변 base로
+                    "round": rnd,
                 }
                 st.rerun()
             else:
-                domain_str = (existing if existing.filled() else intake.inferred).to_prompt(lang)
                 try:
-                    _run_loop(idea, mode, state, domain_str)
+                    _run_loop(idea, mode, state, merged.to_prompt(lang))
                 except Exception as e:
                     st.error(f"오류: {e}" if ko else f"Error: {e}")
                     return
