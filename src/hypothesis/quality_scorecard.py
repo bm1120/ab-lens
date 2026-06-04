@@ -136,7 +136,8 @@ def judge_hypothesis(
         _call = call_structured
     try:
         return _call(prompt=prompt, system=judge_system(lang), schema=LLMJudgment,
-                     api_key=api_key, provider=provider, lang=lang, model=model)
+                     api_key=api_key, provider=provider, lang=lang, model=model,
+                     temperature=0.0)   # 결정론 판정 → 재현성↑ (T1c: 게이트 흔들림 완화)
     except Exception as e:   # API 오류·timeout·validation 실패 → 비관적 폴백(전부 N), 파이프라인 보호
         import logging
         logging.getLogger(__name__).warning("HQS LLM judge 실패 → 비관적 폴백(N): %s", e)

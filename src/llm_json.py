@@ -48,11 +48,14 @@ def call_structured(
     provider: LLMProvider,
     lang: str = "ko",
     model: str | None = None,
+    temperature: float | None = None,
 ) -> T:
     """LLM 호출 → JSON 추출 → schema 로 검증된 모델 반환.
 
     schema 의 JSON Schema 를 system 프롬프트에 주입해 필드명 불일치를 방지한다.
+    temperature: 판정류 호출은 0으로 재현성을 높일 수 있다(기본 None=provider 기본값).
     """
     guided_system = system + _schema_instruction(schema)
-    text = call_llm(prompt=prompt, system=guided_system, api_key=api_key, provider=provider, lang=lang, model=model)
+    text = call_llm(prompt=prompt, system=guided_system, api_key=api_key, provider=provider,
+                    lang=lang, model=model, temperature=temperature)
     return schema.model_validate(extract_json(text))

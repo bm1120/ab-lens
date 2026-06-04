@@ -75,6 +75,7 @@ def call_llm(
     provider: LLMProvider,
     lang: str = "ko",
     model: str | None = None,
+    temperature: float | None = None,
 ) -> str:
     """
     LLM을 호출하고 텍스트 응답을 반환합니다.
@@ -95,16 +96,17 @@ def call_llm(
         RuntimeError: 요청 한도 초과 또는 API 오류
     """
     if provider == LLMProvider.ANTHROPIC:
-        return _call_anthropic(prompt=prompt, system=system, api_key=api_key, model=model or ANTHROPIC_MODEL)
+        return _call_anthropic(prompt=prompt, system=system, api_key=api_key, model=model or ANTHROPIC_MODEL, temperature=temperature)
     elif provider == LLMProvider.CLAUDE_CODE:
-        return _call_claude_code(prompt=prompt, system=system, token=api_key, model=model or CLAUDE_CODE_MODEL)
+        return _call_claude_code(prompt=prompt, system=system, token=api_key, model=model or CLAUDE_CODE_MODEL, temperature=temperature)
     elif provider == LLMProvider.OPENROUTER:
-        return _call_openrouter(prompt=prompt, system=system, api_key=api_key, model=model or OPENROUTER_MODEL)
+        return _call_openrouter(prompt=prompt, system=system, api_key=api_key, model=model or OPENROUTER_MODEL, temperature=temperature)
     else:
         raise ValueError(f"지원하지 않는 provider: {provider}")
 
 
-def _call_claude_code(prompt: str, system: str, token: str, model: str = CLAUDE_CODE_MODEL) -> str:
+def _call_claude_code(prompt: str, system: str, token: str, model: str = CLAUDE_CODE_MODEL,
+                      temperature: float | None = None) -> str:
     """Claude Code 구독 OAuth 토큰으로 호출 (auth_token=Bearer + oauth 베타 헤더)."""
     try:
         client = anthropic.Anthropic(
@@ -122,6 +124,7 @@ def _call_claude_code(prompt: str, system: str, token: str, model: str = CLAUDE_
                 }
             ],
             messages=[{"role": "user", "content": prompt}],
+            **({"temperature": temperature} if temperature is not None else {}),
         )
         block = response.content[0]
         if not isinstance(block, anthropic.types.TextBlock):
@@ -135,7 +138,8 @@ def _call_claude_code(prompt: str, system: str, token: str, model: str = CLAUDE_
         raise RuntimeError(f"Claude Code API 오류: {e}") from e
 
 
-def _call_anthropic(prompt: str, system: str, api_key: str, model: str = ANTHROPIC_MODEL) -> str:
+def _call_anthropic(prompt: str, system: str, api_key: str, model: str = ANTHROPIC_MODEL,
+                    temperature: float | None = None) -> str:
     """Anthropic SDK로 LLM 호출 (Prompt Caching 적용)"""
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -150,6 +154,7 @@ def _call_anthropic(prompt: str, system: str, api_key: str, model: str = ANTHROP
                 }
             ],
             messages=[{"role": "user", "content": prompt}],
+            **({"temperature": temperature} if temperature is not None else {}),
         )
         # content[0]가 TextBlock임을 보장
         block = response.content[0]
@@ -164,7 +169,8 @@ def _call_anthropic(prompt: str, system: str, api_key: str, model: str = ANTHROP
         raise RuntimeError(f"Anthropic API 오류: {e}") from e
 
 
-def _call_openrouter(prompt: str, system: str, api_key: str, model: str = OPENROUTER_MODEL) -> str:
+def _call_openrouter(prompt: str, system: str, api_key: str, model: str = OPENROUTER_MODEL,
+                     temperature: float | None = None) -> str:
     """OpenAI SDK로 OpenRouter 호출 (OpenAI 호환 API)"""
     try:
         client = OpenAI(
@@ -182,6 +188,7 @@ def _call_openrouter(prompt: str, system: str, api_key: str, model: str = OPENRO
                 "HTTP-Referer": OPENROUTER_HTTP_REFERER,
                 "X-Title": OPENROUTER_APP_TITLE,
             },
+            **({"temperature": temperature} if temperature is not None else {}),
         )
         content = response.choices[0].message.content
         if content is None:

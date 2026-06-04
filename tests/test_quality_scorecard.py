@@ -209,6 +209,19 @@ def test_judgment_all_default_N():
     assert j.falsifiable == "N" and j.tradeoff_real == "N"
 
 
+def test_judge_uses_temperature_zero():
+    # T1c 하드닝: judge는 결정론(temperature=0)으로 호출되어야 재현성↑
+    from src.hypothesis.quality_scorecard import judge_hypothesis
+    captured = {}
+
+    def cap(**kw):
+        captured.update(kw)
+        return LLMJudgment()
+
+    judge_hypothesis(mk_hyp(), api_key="k", provider=None, _call=cap)
+    assert captured.get("temperature") == 0.0
+
+
 def test_stall_gate_failed_stays_redesign():
     # 게이트 결격으로 정체 종료 시 soft pass 아님 → REDESIGN (Gemini #1)
     bad = score_hypothesis(mk_hyp(suggested_primary_metric="성공"), mk_judge())  # gate fail
