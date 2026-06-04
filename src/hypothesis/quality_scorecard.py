@@ -15,7 +15,8 @@ from typing import Callable, Optional
 from src.design_schemas import HypothesisOutput
 from src.llm_client import LLMProvider
 from src.hypothesis.scorecard_lexicons import (
-    direction_rx, vague_metric_set, vague_terms_set,
+    direction_rx, judge_prompt_template, judge_system, norm_token,
+    vague_metric_set, vague_terms_set,
 )
 from src.hypothesis.scorecard_schemas import (
     DimScore, Grade, LLMJudgment, ScorecardResult,
@@ -37,13 +38,16 @@ ABS_PASS, ABS_ACCEPTABLE = 80, 68
 def _d1(h: HypothesisOutput, lang: str) -> DimScore:
     """측정가능성 ★게이트. measurability_confirmed 플래그는 무용(진단: 100% True)
     → 실질 신호는 '지표명이 동어반복 화이트리스트 밖의 실제 지표인가'."""
-    m = (h.suggested_primary_metric or "").strip()
-    if not m or len(m) < 2:
+    raw = (h.suggested_primary_metric or "").strip()
+    if not raw or len(raw) < 2:
         return DimScore(score=0, max=20, is_gate=True, passed=False, note="1차 지표 없음")
-    first = m.split()[0] if m.split() else m
-    if m in vague_metric_set(lang) or first in vague_metric_set(lang):
-        return DimScore(score=10, max=20, is_gate=True, passed=False, note=f"지표 '{m}'가 동어반복")
-    return DimScore(score=20, max=20, is_gate=True, passed=True, note="")
+    vm = vague_metric_set(lang)
+    words = raw.split()
+    m_norm = norm_token(raw, lang)
+    first_norm = norm_token(words[0], lang) if words else m_norm
+    if m_norm in vm or first_norm in vm:
+        return DimScore(score=10, max=20, is_gate=True, passed=False, note=f"지표 '{raw}'가 동어반복")
+    return DimScore(score=20, max=20, is_gate=True, passed=True)
 
 
 def _d2(h: HypothesisOutput, j: LLMJudgment, lang: str) -> DimScore:
@@ -57,7 +61,8 @@ def _d2(h: HypothesisOutput, j: LLMJudgment, lang: str) -> DimScore:
 
 def _d3(h: HypothesisOutput, j: LLMJudgment) -> DimScore:
     """인과 메커니즘 = 구조(룰 0~10) + 타당성(LLM Y/P/N → 15/8/0). N이어도 구조는 살림."""
-    segs = [s for s in re.split(r"[→\-➜>]+", h.mechanism_path or "") if s.strip()]
+    # "개입 → 행동 → 지표" = 최소 3노드(화살표 2개). 화살표 없으면 구조 0(LLM이 타당성 보강).
+    segs = [s for s in re.split(r"[-→➜>]+", h.mechanism_path or "") if s.strip()]
     if len(segs) < 3:
         struct = 0
     elif any(len(s.strip()) < 2 for s in segs):
@@ -74,9 +79,17 @@ def _d4(h: HypothesisOutput, j: LLMJudgment) -> DimScore:
     """측정정렬·리스크 — 진단 반영: 개수 아님(항상 채워짐), LLM 관련성 판정.
     교란 관련성(처치배정 AND 지표 영향) + 트레이드오프 실재. 단 list 비면 해당 부분 0."""
     conf = {"Y": 10, "P": 5, "N": 0}[j.confound_relevant] if h.confounder_candidates else 0
-    trade = (10 if j.tradeoff_real == "Y" else 0) if h.predicted_tradeoff_metrics else 0
+    trade = {"Y": 10, "P": 5, "N": 0}[j.tradeoff_real] if h.predicted_tradeoff_metrics else 0
     sc = conf + trade
-    return DimScore(score=sc, max=20, passed=sc >= FLOORS["D4"], note=j.risk_issue if sc < FLOORS["D4"] else "")
+    note = ""
+    if sc < FLOORS["D4"]:
+        miss = []
+        if not h.confounder_candidates:
+            miss.append("교란후보 없음")
+        if not h.predicted_tradeoff_metrics:
+            miss.append("트레이드오프 없음")
+        note = "; ".join(miss) or j.risk_issue or "교란·트레이드오프 관련성 낮음"
+    return DimScore(score=sc, max=20, passed=sc >= FLOORS["D4"], note=note)
 
 
 def _d5(h: HypothesisOutput, j: LLMJudgment) -> DimScore:
@@ -89,9 +102,11 @@ def _d5(h: HypothesisOutput, j: LLMJudgment) -> DimScore:
 
 def _d6(h: HypothesisOutput, j: LLMJudgment, lang: str) -> tuple[DimScore, bool]:
     """명료성 = 모호어 밀도 게이밍 차단(룰) × LLM 명료성(Y/P/N). 반환: (점수, 룰차단여부)."""
-    toks = (h.sharpened_hypothesis or "").split()
+    text = h.sharpened_hypothesis or ""
+    toks = text.split()
     vt = vague_terms_set(lang)
-    density = sum(t.strip(".,!?") in vt for t in toks) / max(len(toks), 1)
+    cmp_text = text.lower()                         # 복합어·영어 대소문자 모두 substring 매칭
+    density = sum(1 for term in vt if term.lower() in cmp_text) / max(len(toks), 1)
     if density >= D6_VAGUE_DENSITY:
         return DimScore(score=0, max=10, passed=False, note=f"모호어 밀도 {density:.0%} 과다"), True
     sc = {"Y": 10, "P": 5, "N": 0}[j.clarity]
@@ -99,40 +114,7 @@ def _d6(h: HypothesisOutput, j: LLMJudgment, lang: str) -> tuple[DimScore, bool]
 
 
 # ─────────────────────────── 룰 가이드 LLM judge ───────────────────────────
-JUDGE_SYSTEM = (
-    "너는 가설 품질 판정자다. **점수(숫자)를 생성하지 마라.** 아래 각 항목의 판정 규칙을 그대로 적용해 "
-    "Y/P/N(또는 Y/N)과 1줄 근거만 낸다. 규칙을 벗어난 임의 판단 금지."
-)
-
-JUDGE_PROMPT = """다음 가설을 항목별 **판정 규칙**대로만 판정하라.
-
-[falsifiable] (Y/N) — 규칙: '이 가설이 틀렸다'고 판명날 **구체적 관측 시나리오를 1문장으로 쓸 수 있을 때만 Y**.
-  쓸 수 없거나 동어반복("성공률이 오른다")이면 N. Y면 falsify_scenario에 그 1문장.
-
-[mechanism_plausible] (Y/P/N) — 규칙: 개입→행동→지표의 **화살표를 하나씩** 본다.
-  Y=모든 링크가 인과적이고 비약 없음 / P=정확히 한 링크가 미진술 가정 필요(복구가능) / N=링크 누락 또는 상관관계를 인과로 둔갑 또는 약한 링크 2개+. P/N이면 mechanism_gap에 끊긴 링크.
-
-[clarity] (Y/P/N) — 규칙: Y=단일 개입 + 단일 1차지표 + 방향 명시 + 해석 유일 / P=대체로 명확하나 모호 요소 1개 / N=다의적·복합. clarity_issue에 사유.
-
-[confound_relevant] (Y/P/N) — 규칙: 나열된 교란후보가 **처치 배정 AND 지표 둘 다에 그럴듯하게 영향**을 주는가.
-  Y=그런 후보 2개+ / P=1개 / N=일반론·무관. (개수 자체는 무시, 관련성만)
-
-[tradeoff_real] (Y/N) — 규칙: 나열된 트레이드오프 중 **1차 지표가 개선될 때 실제로 악화될 수 있는 가드레일**이 1개+ 있으면 Y, 무관/없으면 N.
-
-[alt_justified] (Y/P/N) — 규칙: rejected_alternatives에 '왜 이 가설이 나은지' **실질 사유**가 있나.
-  Y=실질 사유 1개+ / P=빈약("더 나쁨" 수준) / N=없음.
-
-confound_relevant·tradeoff_real·alt_justified 근거는 risk_issue·alt_issue에 1줄.
-
-가설: {sharpened_hypothesis}
-메커니즘: {mechanism_path}
-JTBD: {jtbd_reframe}
-1차지표: {primary_metric}
-보조지표: {secondary}
-트레이드오프: {tradeoffs}
-교란후보: {confounders}
-기각대안: {rejected}
-"""
+# 프롬프트/시스템은 lang별로 scorecard_lexicons.JUDGE_PROMPT/JUDGE_SYSTEM에 분리(i18n).
 
 
 def judge_hypothesis(
@@ -141,7 +123,7 @@ def judge_hypothesis(
     _call: Optional[Callable] = None,
 ) -> LLMJudgment:
     """룰 가이드 LLM judge — 턴당 1회. _call 주입 시 테스트용 mock."""
-    prompt = JUDGE_PROMPT.format(
+    prompt = judge_prompt_template(lang).format(
         sharpened_hypothesis=h.sharpened_hypothesis, mechanism_path=h.mechanism_path,
         jtbd_reframe=h.jtbd_reframe, primary_metric=h.suggested_primary_metric,
         secondary="; ".join(h.suggested_secondary_metrics),
@@ -152,8 +134,13 @@ def judge_hypothesis(
     if _call is None:
         from src.llm_json import call_structured
         _call = call_structured
-    return _call(prompt=prompt, system=JUDGE_SYSTEM, schema=LLMJudgment,
-                 api_key=api_key, provider=provider, lang=lang, model=model)
+    try:
+        return _call(prompt=prompt, system=judge_system(lang), schema=LLMJudgment,
+                     api_key=api_key, provider=provider, lang=lang, model=model)
+    except Exception as e:   # API 오류·timeout·validation 실패 → 비관적 폴백(전부 N), 파이프라인 보호
+        import logging
+        logging.getLogger(__name__).warning("HQS LLM judge 실패 → 비관적 폴백(N): %s", e)
+        return LLMJudgment()
 
 
 # ─────────────────────────── 채점 + 등급 ───────────────────────────
@@ -194,16 +181,30 @@ def score_hypothesis(
 
 # ─────────────────────────── 정체 방지 (Best-so-far Soft Pass) ───────────────────────────
 def should_stop(history: list[ScorecardResult], mode: str = "quick") -> tuple[bool, str, ScorecardResult]:
-    """정체 = 피드백 소진(동일 미달차원 반복). 항상 best-so-far(argmax 총점) 반환. Expander 롤백 안 함."""
+    """정체 = 피드백 소진(동일 미달차원/총점하락). 항상 best-so-far(argmax 총점) 반환. Expander 롤백 안 함.
+
+    ★ 게이트 결격(측정/반증)으로 끝나면 soft pass 아님 — best.grade가 이미 REDESIGN이라 통과 불가.
+    """
+    assert history, "history가 비어있다"
     cur = history[-1]
     best = max(history, key=lambda r: r.total)
+
+    def _terminate(reason: str) -> tuple[bool, str, ScorecardResult]:
+        # 누적 최고점도 게이트 결격이면 REDESIGN 유지(설계 원칙 ★ — soft pass 금지)
+        if not best.gate_passed:
+            return True, "게이트 결격 누적 → REDESIGN(통과 불가)", best
+        return True, reason, best
+
     if cur.grade in ("PASS", "ACCEPTABLE_CAVEAT"):
         return True, "pass", cur
     if len(history) >= MAX_TURNS.get(mode, 2):
-        return True, "max_turns → best-so-far soft pass + caveat", best
-    if len(history) >= 2 and cur.failed_set == history[-2].failed_set:
-        return True, "stall(동일 결손 반복) → best-so-far soft pass", best
+        return _terminate("max_turns → best-so-far soft pass + caveat")
+    if len(history) >= 2 and (
+        set(cur.failed_set) == set(history[-2].failed_set)
+        or cur.total < history[-2].total            # 총점 하락도 정체로 간주
+    ):
+        return _terminate("stall(동일 결손/총점 하락) → best-so-far soft pass")
     if (len(history) >= 2 and cur.failed_rule_dims
-            and cur.failed_rule_dims == history[-2].failed_rule_dims):
-        return True, "stall(rule only) → best-so-far soft pass", best
+            and set(cur.failed_rule_dims) == set(history[-2].failed_rule_dims)):
+        return _terminate("stall(rule only) → best-so-far soft pass")
     return False, "continue", cur

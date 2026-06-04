@@ -144,17 +144,24 @@ def test_should_stop_on_pass():
     assert stop and reason == "pass"
 
 
+def _weak_passed():
+    # 게이트는 통과(D1·D2 OK)하되 품질 약함 → REFINE (soft-pass 경로 테스트용)
+    j = mk_judge(mechanism_plausible="N", clarity="N", confound_relevant="N",
+                 tradeoff_real="N", alt_justified="N")
+    r = score_hypothesis(mk_hyp(), j)
+    assert r.gate_passed and r.grade == "REFINE"
+    return r
+
+
 def test_should_stop_max_turns_best_so_far():
-    bad = score_hypothesis(mk_hyp(suggested_primary_metric="성공"), mk_judge())  # REDESIGN
-    hist = [bad, bad]
-    stop, reason, best = should_stop(hist, "quick")  # quick max=2
-    assert stop and "max_turns" in reason
+    weak = _weak_passed()
+    stop, reason, best = should_stop([weak, weak], "quick")  # quick max=2
+    assert stop and "max_turns" in reason and best.gate_passed is True
 
 
 def test_should_stop_feedback_exhaustion():
-    bad = score_hypothesis(mk_hyp(sharpened_hypothesis="좋아지는 가설", suggested_primary_metric="성공"), mk_judge())
-    # deep max=3 이라 동일 failed_set 반복으로 종료되는지
-    stop, reason, best = should_stop([bad, bad], "deep")
+    weak = _weak_passed()
+    stop, reason, best = should_stop([weak, weak], "deep")  # deep max=3, len 2 → stall
     assert stop and "stall" in reason
 
 
@@ -165,3 +172,46 @@ def test_feedback_lists_failed_dims():
     dims = [d["dimension"] for d in fb["failed_dimensions"]]
     assert any("D1" in d for d in dims)
     assert "절대 수정하지" in fb["refinement_directive"]
+
+
+# ── cross_verify 리뷰 반영 회귀 ──────────────────────────────
+def test_en_uppercase_metric_caught():
+    # "Success"(대문자) 도 영어 동어반복으로 잡혀야 (cross_verify #3/#B)
+    r = score_hypothesis(mk_hyp(suggested_primary_metric="Success"), mk_judge(), lang="en")
+    assert r.scores["D1"].score == 10
+
+
+def test_compound_vague_term_blocks_d6():
+    # 복합 모호어("더 나은", "어느 정도")는 split 토큰엔 안 잡혔던 버그 (cross_verify #A)
+    txt = "더 나은 결과를 어느 정도 적절히 개선하여 향상시킨다"
+    r = score_hypothesis(mk_hyp(sharpened_hypothesis=txt), mk_judge(clarity="Y"))
+    assert r.scores["D6"].score == 0
+
+
+def test_tradeoff_P_does_not_crash_and_maps():
+    # LLM이 Y/N 필드에 P를 줘도 crash 없이 처리 (cross_verify Gemini #4)
+    j = mk_judge(tradeoff_real="P")
+    assert j.tradeoff_real == "P"                       # 스키마가 YPN 허용
+    r = score_hypothesis(mk_hyp(), j)
+    # P → 5점 (Y=10), conf Y=10 → D4=15
+    assert r.scores["D4"].score == 15
+
+
+def test_judgment_coerces_garbage_to_N():
+    from src.hypothesis.scorecard_schemas import LLMJudgment
+    j = LLMJudgment(falsifiable="yes", mechanism_plausible="garbage", clarity="")
+    assert j.falsifiable == "Y" and j.mechanism_plausible == "N" and j.clarity == "N"
+
+
+def test_judgment_all_default_N():
+    from src.hypothesis.scorecard_schemas import LLMJudgment
+    j = LLMJudgment()   # judge 폴백 시 (전부 N, 비관적)
+    assert j.falsifiable == "N" and j.tradeoff_real == "N"
+
+
+def test_stall_gate_failed_stays_redesign():
+    # 게이트 결격으로 정체 종료 시 soft pass 아님 → REDESIGN (Gemini #1)
+    bad = score_hypothesis(mk_hyp(suggested_primary_metric="성공"), mk_judge())  # gate fail
+    stop, reason, best = should_stop([bad, bad], "deep")
+    assert stop and best.gate_passed is False and best.grade == "REDESIGN"
+    assert "REDESIGN" in reason
