@@ -60,13 +60,28 @@ SYSTEM_DEEP_EN = (
 )
 
 
-def _build_prompt(idea: str, exp: ExpanderOutput) -> str:
-    return (
+def _build_prompt(
+    idea: str,
+    exp: ExpanderOutput,
+    refinement: dict | None = None,
+    prev: HypothesisOutput | None = None,
+) -> str:
+    base = (
         f"원 아이디어: {idea}\n"
         f"JTBD: {exp.jtbd_reframe}\n"
         f"암묵적 전제: {exp.implicit_assumptions}\n"
         f"발산된 후보:\n" + "\n".join(f"- {c}" for c in exp.candidate_hypotheses)
     )
+    # 멀티턴 루프(T3): 가설품질 스코어카드 피드백을 받아 이전 가설을 재고도화
+    if refinement and prev is not None:
+        import json
+        base += (
+            "\n\n[재고도화 — 이전 가설을 아래 피드백 결손만 보강하라. 이미 통과한 차원은 절대 수정 금지]\n"
+            f"이전 sharpened_hypothesis: {prev.sharpened_hypothesis}\n"
+            f"이전 mechanism_path: {prev.mechanism_path}\n"
+            f"피드백(JSON):\n{json.dumps(refinement, ensure_ascii=False, indent=2)}"
+        )
+    return base
 
 
 def _build_deep_critique_prompt(idea: str, round1: HypothesisOutput) -> str:
@@ -100,11 +115,13 @@ def sharpen(
     lang: str = "ko",
     mode: Literal["quick", "deep"] = "quick",
     model: str | None = None,
+    refinement: dict | None = None,
+    prev_hypothesis: HypothesisOutput | None = None,
 ) -> HypothesisOutput:
-    # Round 1: 기존 수렴 + 메커니즘 명시
+    # Round 1: 기존 수렴 + 메커니즘 명시 (refinement 있으면 이전 가설 재고도화 — T3 루프)
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
     out = call_structured(
-        prompt=_build_prompt(idea, expander_output),
+        prompt=_build_prompt(idea, expander_output, refinement, prev_hypothesis),
         system=system,
         schema=HypothesisOutput,
         api_key=api_key,
