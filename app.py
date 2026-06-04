@@ -384,27 +384,55 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
     # ── 멀티턴 루프 결과: 가설품질 스코어카드 요약 (run_quality_loop일 때만) ──
     sc = getattr(result, "scorecard", None)
     if sc is not None:
-        emoji = {"PASS": "✅", "ACCEPTABLE_CAVEAT": "🟡", "REFINE": "🔁", "REDESIGN": "🔴"}.get(sc.grade, "")
+        # 내부 enum → 사용자 친화 라벨 (로직/스키마는 enum 유지)
+        GRADE = {
+            "PASS": ("✅ 통과 — 실험 진행 가능", "✅ Pass — ready to run"),
+            "ACCEPTABLE_CAVEAT": ("🟡 조건부 통과 — 보완점 있으나 진행 가능", "🟡 Acceptable — minor gaps, can proceed"),
+            "REFINE": ("🔁 보강 필요 — 더 다듬어야 함", "🔁 Needs work — refine further"),
+            "REDESIGN": ("🔴 재설계 필요 — 측정/반증 불가", "🔴 Redesign — not measurable/falsifiable"),
+        }
+        DIM = {"ko": {"D1": "측정가능성", "D2": "반증가능성", "D3": "인과메커니즘",
+                      "D4": "정렬·리스크", "D5": "대안탐색", "D6": "명료성"},
+               "en": {"D1": "Measurable", "D2": "Falsifiable", "D3": "Mechanism",
+                      "D4": "Align·Risk", "D5": "Alternatives", "D6": "Clarity"}}[lang if lang in ("ko", "en") else "ko"]
+
+        def _stop(r: str) -> str:
+            if "REDESIGN" in r or "결격" in r:
+                return "측정·반증 게이트 미충족" if ko else "gate not met"
+            if "max_turns" in r or "hard_limit" in r:
+                return "최대 반복 도달 — 최선안 채택" if ko else "max rounds — best kept"
+            if "stall" in r:
+                return "더 개선되지 않음 — 최선안 채택" if ko else "no further improvement — best kept"
+            if r == "pass":
+                return "품질 통과" if ko else "passed"
+            return r
+
         turns = getattr(result, "turns", 1)
         best_turn = getattr(result, "best_turn", 1)
-        st.markdown((f"#### {emoji} 가설품질 {sc.grade} · {turns}턴 (채택 {best_turn}턴)") if ko
-                    else f"#### {emoji} Quality {sc.grade} · {turns} turns (picked #{best_turn})")
-        gate_txt = ("통과" if sc.gate_passed else "결격") if ko else ("pass" if sc.gate_passed else "fail")
-        st.caption((f"게이트(측정·반증): {gate_txt} · 총점 {sc.total}/100 · 종료: {result.stop_reason}") if ko
-                   else f"Gate(measure·falsify): {gate_txt} · {sc.total}/100 · stop: {result.stop_reason}")
+        glabel = GRADE.get(sc.grade, (sc.grade, sc.grade))[0 if ko else 1]
+        st.markdown(f"#### {glabel}")
+        st.caption((f"{turns}회 고도화 (채택 {best_turn}회차) · 게이트(측정·반증) {'충족' if sc.gate_passed else '미충족'} · "
+                    f"품질점수 {sc.total}/100 · {_stop(result.stop_reason)}") if ko
+                   else f"{turns} rounds (picked #{best_turn}) · gate {'met' if sc.gate_passed else 'unmet'} · "
+                        f"score {sc.total}/100 · {_stop(result.stop_reason)}")
         if sc.scores:
             for col, (d, ds) in zip(st.columns(len(sc.scores)), sc.scores.items()):
-                col.metric(d, f"{ds.score}/{ds.max}", "✓" if ds.passed else "✗",
+                delta = ("충족" if ds.passed else "미달") if ko else ("ok" if ds.passed else "low")
+                col.metric(DIM.get(d, d), f"{ds.score}/{ds.max}", delta,
                            delta_color="normal" if ds.passed else "inverse")
         if sc.caveats:
-            st.warning("⚠️ " + " / ".join(sc.caveats))
-        with st.expander((f"턴별 이력 ({turns})") if ko else f"Per-turn history ({turns})"):
+            named = []
+            for c in sc.caveats:
+                key, _, rest = c.partition(":")
+                named.append(f"{DIM.get(key.strip(), key.strip())}:{rest}" if rest else c)
+            st.warning(("⚠️ 보완점 — " if ko else "⚠️ Caveats — ") + " / ".join(named))
+        with st.expander((f"고도화 과정 ({turns}회)") if ko else f"Refinement history ({turns})"):
             for h in getattr(result, "history", []):
                 mark = "⭐" if h.turn == best_turn else "▫️"
-                st.write(f"{mark} {'턴' if ko else 'turn '}{h.turn}: **{h.grade}** · "
-                         f"{'총점' if ko else 'score'} {h.total} · "
-                         f"{'게이트' if ko else 'gate'} {'O' if h.gate_passed else 'X'}"
-                         + (f" · {'미달' if ko else 'failed'} {h.failed_set}" if h.failed_set else ""))
+                hg = GRADE.get(h.grade, (h.grade, h.grade))[0 if ko else 1]
+                gaps = ", ".join(DIM.get(x, x) for x in h.failed_set)
+                st.write(f"{mark} {h.turn}{'회차' if ko else ''}: {hg} · {'품질' if ko else 'score'} {h.total}"
+                         + (f" · {'미보완' if ko else 'gaps'} {gaps}" if gaps else ""))
         st.divider()
 
     # 대안 재실행 배지
