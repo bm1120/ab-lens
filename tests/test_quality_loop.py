@@ -86,3 +86,41 @@ def test_loop_history_records_turns():
                          _sharpen=lambda *a, **k: good_hyp(), _judge=lambda *a, **k: GOOD, _bias=bias_fn)
     assert len(r.history) == r.turns
     assert r.history[0].grade == "PASS"
+    assert r.best_turn == 1
+
+
+# ── cross_verify 리뷰 반영 회귀 ──────────────────────────────
+def test_best_idx_prefers_gate_passed_over_total():
+    from src.hypothesis.quality_loop import _best_idx
+    from src.hypothesis.scorecard_schemas import ScorecardResult
+    # 게이트 결격 고득점(90) vs 게이트 통과 저득점(70) → 통과를 채택 (게이트 paramount)
+    pairs = [("h0", ScorecardResult(scores={}, total=90, gate_passed=False, grade="REDESIGN")),
+             ("h1", ScorecardResult(scores={}, total=70, gate_passed=True, grade="PASS"))]
+    assert _best_idx(pairs) == 1
+
+
+def test_loop_exception_returns_partial_best():
+    st = {"t": 0}
+
+    def jg(h, **k):
+        st["t"] += 1
+        if st["t"] == 2:
+            raise RuntimeError("judge down")
+        return WEAK   # 1턴 약함(REFINE) → 계속 → 2턴 judge 예외
+
+    r = run_quality_loop("아이디어", mode="deep", api_key="k", provider=None,
+                         _route=route_ok, _expand=exp_fn, _sharpen=lambda *a, **k: good_hyp(),
+                         _judge=jg, _bias=bias_fn)
+    assert r.hypothesis is not None          # 부분결과(1턴) 보존
+    assert r.turns == 1
+    assert "exception" in r.stop_reason
+
+
+def test_loop_hard_limit_defensive(monkeypatch):
+    import src.hypothesis.quality_loop as ql
+    monkeypatch.setattr(ql, "should_stop", lambda hist, mode: (False, "continue", hist[-1]))
+    r = run_quality_loop("아이디어", mode="quick", api_key="k", provider=None,
+                         _route=route_ok, _expand=exp_fn, _sharpen=lambda *a, **k: good_hyp(),
+                         _judge=lambda *a, **k: WEAK, _bias=bias_fn)
+    assert r.turns == ql.HARD_MAX_TURNS
+    assert r.stop_reason == "hard_limit"

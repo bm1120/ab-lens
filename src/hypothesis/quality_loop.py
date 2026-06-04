@@ -25,6 +25,10 @@ from src.hypothesis.quality_scorecard import (
 from src.hypothesis.scorecard_schemas import ScorecardResult
 
 
+# should_stop이 종료를 소유하지만, 버그·예외 대비 방어적 하드 리미트(should_stop의 max_turns보다 큼).
+HARD_MAX_TURNS = 8
+
+
 class TurnRecord(BaseModel):
     turn: int
     grade: str
@@ -36,12 +40,18 @@ class TurnRecord(BaseModel):
 class QualityLoopResult(BaseModel):
     trivial: bool = False
     trivial_reason: Optional[str] = None
-    hypothesis: Optional[HypothesisOutput] = None        # best-so-far
+    hypothesis: Optional[HypothesisOutput] = None        # best-so-far (게이트통과 우선, 그다음 총점)
     scorecard: Optional[ScorecardResult] = None
     bias_screen: Optional[BiasScreenResult] = None
     turns: int = 0
+    best_turn: int = 0                                    # 채택된 턴(1-base)
     stop_reason: str = ""
     history: list[TurnRecord] = []
+
+
+def _best_idx(pairs: list) -> int:
+    """게이트 통과를 최우선, 그다음 총점 (게이트가 paramount — 결격 고득점보다 통과를 채택)."""
+    return max(range(len(pairs)), key=lambda i: (pairs[i][1].gate_passed, pairs[i][1].total))
 
 
 def run_quality_loop(
@@ -81,26 +91,38 @@ def run_quality_loop(
     pairs: list[tuple[HypothesisOutput, ScorecardResult]] = []
     refinement: Optional[dict] = None
     prev: Optional[HypothesisOutput] = None
+    reason = "hard_limit"
 
-    while True:
-        turn = len(pairs) + 1
-        hyp = sharpen_fn(
-            idea, exp, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model,
-            refinement=refinement, prev_hypothesis=prev,
-        )
-        emit(f"sharpener#{turn}")
-        judgment = judge_fn(hyp, api_key=api_key, provider=provider, lang=lang, model=model)
-        sc = score_hypothesis(hyp, judgment, lang=lang)
-        emit(f"scorecard#{turn}:{sc.grade}({sc.total})")
-        pairs.append((hyp, sc))
+    try:
+        while len(pairs) < HARD_MAX_TURNS:            # 방어적 하드 리미트(should_stop이 보통 먼저 종료)
+            turn = len(pairs) + 1
+            hyp = sharpen_fn(
+                idea, exp, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model,
+                refinement=refinement, prev_hypothesis=prev,
+            )
+            emit(f"sharpener#{turn}")
+            judgment = judge_fn(hyp, api_key=api_key, provider=provider, lang=lang, model=model)
+            sc = score_hypothesis(hyp, judgment, lang=lang)
+            emit(f"scorecard#{turn}:{sc.grade}({sc.total})")
+            pairs.append((hyp, sc))
 
-        stop, reason, best_sc = should_stop([p[1] for p in pairs], mode)
-        if stop:
-            break
-        prev = hyp
-        refinement = build_feedback(sc, hyp, lang=lang)
+            stop, reason, _ = should_stop([p[1] for p in pairs], mode)
+            if stop:
+                break
+            # 다음 턴은 best-so-far를 기반으로 재고도화(단조 수렴 — 퇴행 방지), 피드백 주입
+            bprev, bsc = pairs[_best_idx(pairs)]
+            prev, refinement = bprev, build_feedback(bsc, bprev, lang=lang)
+        else:                                         # while 조건 소진(하드리미트 도달, break 안 함)
+            reason = "hard_limit"
+    except Exception as e:                            # sharpen/judge/score 실패 → 부분결과 보존
+        if not pairs:
+            raise
+        import logging
+        logging.getLogger(__name__).warning("quality_loop 예외 → best-so-far 반환: %s", e)
+        reason = f"exception:{type(e).__name__}"
 
-    best_hyp, _ = max(pairs, key=lambda p: p[1].total)
+    best_i = _best_idx(pairs)
+    best_hyp, best_sc = pairs[best_i]
     bias_screen = bias_fn(
         best_hyp.sharpened_hypothesis, mode=mode, api_key=api_key, provider=provider, lang=lang, model=model
     )
@@ -113,5 +135,5 @@ def run_quality_loop(
     ]
     return QualityLoopResult(
         hypothesis=best_hyp, scorecard=best_sc, bias_screen=bias_screen,
-        turns=len(pairs), stop_reason=reason, history=history,
+        turns=len(pairs), best_turn=best_i + 1, stop_reason=reason, history=history,
     )
