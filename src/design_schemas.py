@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from src.bias_pool import BiasType
 
@@ -60,6 +60,33 @@ class DesignQuality(BaseModel):
     # 강제 차단 없음 — advisory_score < 50 이면 강한 경고만
 
 
+class MetricRisk(BaseModel):
+    """DesignAgent LLM 지표검토 한 건 — 정성 코멘트(advisory). 수치 생성 금지."""
+
+    metric: str = "(전체)"               # 어느 지표에 대한 지적 (전반이면 "(전체)")
+    kind: Literal["goodhart", "fwer", "proxy", "guardrail"] = "goodhart"
+    severity: Literal["low", "medium", "high"] = "medium"
+    note: str = ""                       # 위험 설명 + 완화 권고
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _coerce_kind(cls, v):
+        return v if v in ("goodhart", "fwer", "proxy", "guardrail") else "goodhart"
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _coerce_sev(cls, v):
+        v = {"med": "medium", "mid": "medium", "hi": "high", "lo": "low"}.get(v, v)
+        return v if v in ("low", "medium", "high") else "medium"
+
+
+class MetricReview(BaseModel):
+    """지표 리스크 LLM 검토 결과. 빈 객체 = 위험 없음/판정 실패 폴백(차단 안 함)."""
+
+    risks: list[MetricRisk] = []
+    summary: str = ""
+
+
 class SamplePlanOutput(BaseModel):
     metric_type: Literal["proportion", "continuous", "count"]
     per_group: int                       # design effect 반영된 그룹당 표본
@@ -88,6 +115,7 @@ class DesignContext(BaseModel):
     design_quality: DesignQuality
     bias_screening_summary: str          # 탭2 편향 교차 참조용
     alternative_selected: Optional[str] = None
+    metric_review: Optional[MetricReview] = None   # DesignAgent LLM 지표검토(advisory)
 
     def to_json(self) -> str:
         return self.model_dump_json()
