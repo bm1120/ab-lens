@@ -2,7 +2,9 @@
 from unittest.mock import patch, call
 
 from src.hypothesis.expander import ExpanderOutput
-from src.hypothesis.sharpener import sharpen
+from src.hypothesis.sharpener import (
+    sharpen, SYSTEM_KO, SYSTEM_EN, SYSTEM_DEEP_KO, SYSTEM_DEEP_EN,
+)
 from src.design_schemas import HypothesisOutput, RejectedAlternative
 from src.schemas import LLMProvider
 
@@ -153,6 +155,26 @@ def test_deep_mode_second_call_uses_round1_hypothesis():
     second_call_kwargs = mock_cs.call_args_list[1]
     prompt_arg = second_call_kwargs.kwargs.get("prompt") or second_call_kwargs.args[0]
     assert round1.sharpened_hypothesis in prompt_arg
+
+
+def test_deep_round2_uses_critique_system_prompt():
+    """Deep 2라운드는 적대적 비평(DeepCritique) 시스템 프롬프트를 써야 한다(1라운드 수렴 프롬프트 아님)."""
+    with patch("src.hypothesis.sharpener.call_structured",
+               side_effect=[_hypothesis(), _hypothesis_round2()]) as mock_cs:
+        sharpen("결제 전환율을 올리고 싶다", _expander(), api_key="k",
+                provider=LLMProvider.ANTHROPIC, mode="deep", lang="ko")
+    assert mock_cs.call_args_list[0].kwargs["system"] == SYSTEM_KO        # round1 = 수렴
+    assert mock_cs.call_args_list[1].kwargs["system"] == SYSTEM_DEEP_KO   # round2 = 비평
+
+
+def test_deep_round2_uses_english_critique_when_en():
+    """lang=en이면 2라운드도 영어 DeepCritique 시스템 프롬프트."""
+    with patch("src.hypothesis.sharpener.call_structured",
+               side_effect=[_hypothesis(), _hypothesis_round2()]) as mock_cs:
+        sharpen("speed up checkout", _expander(), api_key="k",
+                provider=LLMProvider.ANTHROPIC, mode="deep", lang="en")
+    assert mock_cs.call_args_list[0].kwargs["system"] == SYSTEM_EN
+    assert mock_cs.call_args_list[1].kwargs["system"] == SYSTEM_DEEP_EN
 
 
 def test_deep_mode_confounder_can_be_enriched():

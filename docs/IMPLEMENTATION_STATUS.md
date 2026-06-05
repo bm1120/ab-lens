@@ -102,10 +102,12 @@ fbec852 baseline: ab-lens v1 (탭2 결과분석 MVP)
 
 ## 미구현 / 다음 단계 🔲
 
-- [ ] ~~탭2 결과분석 Claude Code OAuth end-to-end 검증~~ ✅ **완료** (c0e9490)
-- [ ] 대안 선택 재실행 1회 제한 (UI 보조 기능)
-- [ ] DesignAgent LLM 지표검토(Goodhart/FWER 코멘트) — 현재 deterministic 조립으로 대체
-- [ ] DeepCritique 2라운드 (현재 Deep=편향 7종으로 단순화)
-- [ ] 실제 LLM 프롬프트 품질 튜닝 (단위테스트는 전부 mock)
-- [ ] main 브랜치 머지 / PR
+- [x] ~~탭2 결과분석 Claude Code OAuth end-to-end 검증~~ ✅ **완료** (c0e9490)
+- [x] ~~DesignAgent LLM 지표검토(Goodhart/FWER/effect_size/proxy/guardrail)~~ ✅ **완료** (PR #9, 효과크기 중심)
+- [x] ~~DeepCritique 2라운드~~ ✅ **완료** — `sharpener.py` Deep 모드 1라운드 수렴 + 2라운드 적대적 비평. `test_sharpener.py` 10개로 검증(과거 문서가 stale했음)
+- [x] ~~효과크기 중심 통계 철학~~ ✅ **완료** — 탭1 지표검토 + 탭2 95% CI·p값 강등 (PR #9·#10)
+- [x] ~~다양 가설 생성(멀티-롤·하이브리드 멀티프로바이더)~~ ✅ **완료** (PR #11)
+- [x] ~~프로바이더 어댑터(추론 모델 절단 방지)~~ ✅ **완료** (PR #12, `provider-prompting-diagnostic.md`)
+- [x] ~~대안 선택 재실행 1회 제한~~ ✅ **완료** — `app.py` `rerun_count >= 1` enforce
+- [ ] 실제 LLM 프롬프트 품질 **골든셋** 튜닝 (단위테스트는 mock, 진단/스모크는 ad-hoc — 정형 회귀셋 미구축)
 - [ ] (확장 로드맵 B) 다중사용자·API 제품화 시 FastAPI 백엔드 분리
