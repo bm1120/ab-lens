@@ -6,15 +6,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from src.llm_client import call_llm
+from src.llm_client import TruncatedResponseError, call_llm
 from src.schemas import LLMProvider
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class JSONExtractionError(ValueError):
+    """응답에서 JSON 객체를 찾지 못함 (인증 등 다른 ValueError와 구분 — 재시도 대상)."""
 
 
 def extract_json(text: str) -> dict:
@@ -25,7 +30,7 @@ def extract_json(text: str) -> dict:
     bare = re.search(r"\{.*\}", text, re.DOTALL)
     if bare:
         return json.loads(bare.group(0))
-    raise ValueError(f"JSON을 응답에서 찾을 수 없습니다: {text[:200]}")
+    raise JSONExtractionError(f"JSON을 응답에서 찾을 수 없습니다: {text[:200]}")
 
 
 def _schema_instruction(schema: type[BaseModel]) -> str:
@@ -40,6 +45,10 @@ def _schema_instruction(schema: type[BaseModel]) -> str:
     )
 
 
+# 절단/파싱 실패는 전이성(특히 추론 모델) → 1회 재시도로 완화. 인증·한도 오류는 즉시 전파.
+_RETRYABLE = (JSONExtractionError, json.JSONDecodeError, ValidationError, TruncatedResponseError)
+
+
 def call_structured(
     prompt: str,
     system: str,
@@ -49,13 +58,25 @@ def call_structured(
     lang: str = "ko",
     model: str | None = None,
     temperature: float | None = None,
+    max_retries: int = 1,
 ) -> T:
     """LLM 호출 → JSON 추출 → schema 로 검증된 모델 반환.
 
     schema 의 JSON Schema 를 system 프롬프트에 주입해 필드명 불일치를 방지한다.
     temperature: 판정류 호출은 0으로 재현성을 높일 수 있다(기본 None=provider 기본값).
+    절단(TruncatedResponseError)/JSON·스키마 실패 시 max_retries 만큼 재호출(provider 어댑터).
     """
     guided_system = system + _schema_instruction(schema)
-    text = call_llm(prompt=prompt, system=guided_system, api_key=api_key, provider=provider,
-                    lang=lang, model=model, temperature=temperature)
-    return schema.model_validate(extract_json(text))
+    last_err: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            text = call_llm(prompt=prompt, system=guided_system, api_key=api_key, provider=provider,
+                            lang=lang, model=model, temperature=temperature)
+            return schema.model_validate(extract_json(text))
+        except _RETRYABLE as e:
+            last_err = e
+            if attempt < max_retries:
+                logging.getLogger(__name__).warning(
+                    "call_structured 재시도(%d/%d) — %s: %s",
+                    attempt + 1, max_retries, type(e).__name__, str(e)[:120])
+    raise last_err
