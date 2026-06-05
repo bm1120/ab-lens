@@ -78,7 +78,17 @@ def judge_model_for(provider) -> str:
 
 
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
-MAX_TOKENS = 4096  # HypothesisOutput 등 큰 구조화 출력이 잘리지 않도록
+MAX_TOKENS = 4096  # Anthropic 기본 (진단상 절단 없음)
+# OpenRouter 추론 모델(gpt-5 등)은 추론 토큰이 예산을 잠식 → 출력 JSON 절단. 상향으로 방지.
+# (provider-prompting-diagnostic.md: GPT sharpen 2/3 절단 → 8192로)
+MAX_TOKENS_OPENROUTER = 8192
+
+
+class TruncatedResponseError(RuntimeError):
+    """응답이 max_tokens로 절단됨(finish_reason=length / stop_reason=max_tokens).
+
+    절단된 불완전 JSON을 조용히 반환하지 않고 호출부(call_structured)가 재시도/명확실패하도록 신호.
+    """
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_HTTP_REFERER = "https://github.com/bm1120/ab-lens"
 OPENROUTER_APP_TITLE = "ab-lens"
@@ -145,6 +155,8 @@ def _call_claude_code(prompt: str, system: str, token: str, model: str = CLAUDE_
         block = response.content[0]
         if not isinstance(block, anthropic.types.TextBlock):
             raise RuntimeError(f"예상치 못한 응답 블록 타입: {type(block)}")
+        if response.stop_reason == "max_tokens":   # 절단 — 불완전 JSON 조용히 반환 금지
+            raise TruncatedResponseError(f"Claude Code 응답 절단(stop_reason=max_tokens, model={model})")
         return block.text
     except anthropic.AuthenticationError as e:
         raise ValueError(f"Claude Code OAuth 인증 오류: {e}") from e
@@ -176,6 +188,8 @@ def _call_anthropic(prompt: str, system: str, api_key: str, model: str = ANTHROP
         block = response.content[0]
         if not isinstance(block, anthropic.types.TextBlock):
             raise RuntimeError(f"예상치 못한 응답 블록 타입: {type(block)}")
+        if response.stop_reason == "max_tokens":   # 절단 — 불완전 JSON 조용히 반환 금지
+            raise TruncatedResponseError(f"Anthropic 응답 절단(stop_reason=max_tokens, model={model})")
         return block.text
     except anthropic.AuthenticationError as e:
         raise ValueError(f"Anthropic 인증 오류: {e}") from e
@@ -195,7 +209,7 @@ def _call_openrouter(prompt: str, system: str, api_key: str, model: str = OPENRO
         )
         response = client.chat.completions.create(
             model=model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=MAX_TOKENS_OPENROUTER,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -206,9 +220,16 @@ def _call_openrouter(prompt: str, system: str, api_key: str, model: str = OPENRO
             },
             **({"temperature": temperature} if temperature is not None else {}),
         )
-        content = response.choices[0].message.content
-        if content is None:
-            raise RuntimeError("OpenRouter 응답에 content가 없습니다.")
+        choice = response.choices[0]
+        content = choice.message.content
+        # content=None(추론 모델이 예산을 다 써 빈 출력) / finish_reason=length(절단) 모두
+        # 같은 계열 → TruncatedResponseError 로 신호해 call_structured 가 재시도하게 한다.
+        if not content:
+            raise TruncatedResponseError(
+                f"OpenRouter 응답 content 없음(model={model}, finish_reason={choice.finish_reason})")
+        if choice.finish_reason == "length":
+            raise TruncatedResponseError(
+                f"OpenRouter 응답 절단(finish_reason=length, model={model}, max_tokens={MAX_TOKENS_OPENROUTER})")
         return content
     except OAIAuthError as e:
         raise ValueError(f"OpenRouter 인증 오류: {e}") from e
