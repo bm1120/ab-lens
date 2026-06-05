@@ -21,6 +21,7 @@ from src.design_schemas import DesignContext
 from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.hypothesis.quality_loop import run_quality_loop
+from src.hypothesis.diverse_generator import available_providers, generate_diverse
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
 from src.design.metric_review import review_metrics
@@ -249,35 +250,61 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         value=st.session_state.get("design_idea", ""),
         placeholder="예: 결제 버튼을 상단으로 옮기면 체크아웃 전환율이 오를 것이다",
     )
-    c1, c2 = st.columns(2)
-    mode = c1.radio(
-        "분석 깊이" if ko else "Depth", ["quick", "deep"],
+    # ── 생성 방식 선택 (단일 고도화 / 다양 탐색) — 진입점 통합 ──────────────
+    approach = st.radio(
+        "생성 방식" if ko else "Generation approach",
+        ["single", "diverse"],
+        format_func=lambda a: ({
+            "single": "🎯 단일 고도화 — 하나의 가설을 깊게 다듬기",
+            "diverse": "🎲 다양 탐색 — 여러 롤로 발산 후 스코어카드 선별",
+        } if ko else {
+            "single": "🎯 Single refine — deepen one hypothesis",
+            "diverse": "🎲 Diverse — multiple lenses, scored & ranked",
+        })[a],
+        horizontal=True,
+    )
+
+    # 공통 옵션
+    mode = st.radio(
+        "분석 깊이" if ko else "Depth", ["quick", "deep"], horizontal=True,
         format_func=lambda m: {"quick": "Quick (~20s, 편향 3종)", "deep": "Deep (~40s, 편향 7종)"}[m],
     )
-    state = c2.radio(
-        "가설 상태" if ko else "Hypothesis state", ["initial_idea", "team_agreed"],
-        format_func=lambda s: {"initial_idea": "초기 아이디어 (발산부터)", "team_agreed": "팀 합의 완료 (발산 스킵)"}[s]
-        if ko else {"initial_idea": "Initial idea", "team_agreed": "Team-agreed"}[s],
-    )
 
-    use_loop = st.checkbox(
-        "멀티턴 고도화 (가설품질 스코어카드 게이트까지 반복)" if ko
-        else "Multi-turn refinement (loop until quality scorecard gate)",
-        value=st.session_state.get("use_quality_loop", False),
-        help="측정·반증 게이트와 6차원 품질을 만족할 때까지 자동 재고도화. Codex·Gemini 룰가이드 판정 사용."
-        if ko else "Auto-refine until the measurability/falsifiability gate + 6-dim quality pass.",
-    )
-    st.session_state["use_quality_loop"] = use_loop
-
-    # ── T2: 도메인 맥락(선택). 멀티턴일 때만 — 비우면 부족 시 질문 ──
+    # ── 방식별 옵션 ──────────────────────────────────────────────────────────
+    state = "initial_idea"
+    use_loop = False
     domain_in: dict[str, str] = {}
-    if use_loop:
-        with st.expander("도메인/서비스 맥락 (선택 — 비우면 부족 시 질문)" if ko
-                         else "Domain/service context (optional — asked if missing)"):
-            domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", key="dom_service_type")
-            domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", key="dom_user_segment")
-            domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", key="dom_primary_goal")
-            domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", key="dom_constraints")
+    if approach == "single":
+        state = st.radio(
+            "가설 상태" if ko else "Hypothesis state", ["initial_idea", "team_agreed"], horizontal=True,
+            format_func=lambda s: {"initial_idea": "초기 아이디어 (발산부터)", "team_agreed": "팀 합의 완료 (발산 스킵)"}[s]
+            if ko else {"initial_idea": "Initial idea", "team_agreed": "Team-agreed"}[s],
+        )
+        use_loop = st.checkbox(
+            "멀티턴 고도화 (가설품질 스코어카드 게이트까지 반복)" if ko
+            else "Multi-turn refinement (loop until quality scorecard gate)",
+            value=st.session_state.get("use_quality_loop", False),
+            help="측정·반증 게이트와 6차원 품질을 만족할 때까지 자동 재고도화. 판정은 Haiku 룰가이드."
+            if ko else "Auto-refine until the measurability/falsifiability gate + 6-dim quality pass.",
+        )
+        st.session_state["use_quality_loop"] = use_loop
+        # 도메인 맥락(선택). 멀티턴일 때만 — 비우면 부족 시 질문
+        if use_loop:
+            with st.expander("도메인/서비스 맥락 (선택 — 비우면 부족 시 질문)" if ko
+                             else "Domain/service context (optional — asked if missing)"):
+                domain_in["service_type"] = st.text_input("서비스/제품 유형" if ko else "Service/product type", key="dom_service_type")
+                domain_in["user_segment"] = st.text_input("타겟 사용자" if ko else "Target users", key="dom_user_segment")
+                domain_in["primary_goal"] = st.text_input("핵심 비즈니스 목표/지표" if ko else "Primary goal/metric", key="dom_primary_goal")
+                domain_in["constraints"] = st.text_input("제약(규제·기술·기간)" if ko else "Constraints", key="dom_constraints")
+    else:  # diverse
+        provs = available_providers(provider, api_key) if api_key else [(provider, api_key)]
+        if len(provs) > 1:
+            st.caption(("🔀 하이브리드: " if ko else "🔀 Hybrid: ")
+                       + ", ".join(p.value for p, _ in provs)
+                       + (" 벤더에 롤 분산 (실제 멀티프로바이더)" if ko else " — roles across vendors (real multi-provider)"))
+        else:
+            st.caption("단일 provider 멀티-롤 (다양성은 롤에서). 키 추가 시 벤더 분산." if ko
+                       else "Single-provider multi-role. Add keys for vendor diversity.")
 
     def _store(result, used_idea):
         st.session_state.hyp_result = result
@@ -324,14 +351,30 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             st.rerun()
         return
 
-    if st.button("가설 고도화" if ko else "Refine hypothesis", type="primary"):
+    btn_label = (("다양 가설 생성" if approach == "diverse" else "가설 고도화") if ko
+                 else ("Run diverse generation" if approach == "diverse" else "Refine hypothesis"))
+    if st.button(btn_label, type="primary"):
         if not api_key:
             st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
             return
         if not idea.strip():
             st.error("아이디어를 입력하세요." if ko else "Please enter an idea.")
             return
-        if use_loop:
+        if approach == "diverse":
+            try:
+                with st.status("롤별 가설 생성·채점 중…" if ko else "Generating & scoring per role…",
+                               expanded=True) as status:
+                    dres = generate_diverse(
+                        idea, providers=provs, lang=lang, mode=mode, model=model,
+                        on_progress=lambda n: status.write(f"✓ {n}"),
+                    )
+                    status.update(label="완료" if ko else "Done", state="complete")
+                st.session_state["diverse_result"] = dres
+                st.session_state["design_idea"] = idea
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+        elif use_loop:
             from src.hypothesis.domain_intake import DomainContext, analyze_domain
             existing = DomainContext(**domain_in)
             try:
@@ -373,6 +416,34 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
                 return
+
+    # ── 다양 가설 결과 (랭킹 + 채택) — 생성은 위 통합 버튼에서 ────────────────
+    dres = st.session_state.get("diverse_result")
+    if approach == "diverse" and dres and dres.candidates:
+        st.markdown("#### " + ("🎲 다양 가설 랭킹 (스코어카드 선별)" if ko else "🎲 Diverse candidates (scored)"))
+        if dres.multi_provider:
+            st.success("✅ 실제 멀티프로바이더(서로 다른 벤더) 사용" if ko else "✅ Real multi-provider (distinct vendors)")
+        for rank, c in enumerate(dres.candidates, 1):
+            gate = "✅" if c.scorecard.gate_passed else "🔴"
+            cc1, cc2 = st.columns([5, 1])
+            cc1.markdown(
+                f"**{rank}. [{c.role_label}]** {gate} {c.scorecard.total}/100 · `{c.provider}`\n\n"
+                f"{c.hypothesis.sharpened_hypothesis}"
+            )
+            if cc2.button("채택" if ko else "Adopt", key=f"adopt_{c.role}"):
+                from src.hypothesis.bias_screener import screen_bias
+                from src.hypothesis.quality_loop import QualityLoopResult
+                bscreen = screen_bias(c.hypothesis.sharpened_hypothesis, mode=mode,
+                                      api_key=api_key, provider=provider, lang=lang, model=model)
+                adopted = QualityLoopResult(
+                    hypothesis=c.hypothesis, scorecard=c.scorecard, bias_screen=bscreen,
+                    turns=1, best_turn=1, stop_reason=f"diverse:{c.role}",
+                )
+                _store(adopted, idea)
+                st.session_state.pop("diverse_result", None)
+                st.rerun()
+        if dres.roles_failed:
+            st.caption(("실패해 제외된 롤: " if ko else "Excluded (failed): ") + ", ".join(dres.roles_failed))
 
     # ── 표시할 결과 결정 (대안 재실행 결과 우선, 없으면 최초 결과) ────────────
     alt_result = st.session_state.get("hyp_result_alt")
