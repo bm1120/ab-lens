@@ -28,7 +28,26 @@ def analyze_stats(input: ABTestInput) -> StatisticalResult:
     else:
         effect_size_relative_pct = 0.0
 
-    # 통계적 유의성 (p < 0.05)
+    # 효과 크기 95% 신뢰구간 (두 비율 차의 Wald CI) — 효과크기 중심 보고의 핵심.
+    # p값(이분법 유의성)보다 "효과가 얼마나 큰가 + 불확실성 범위"를 우선 노출한다.
+    ci_low_pp = ci_high_pp = 0.0
+    ci_includes_zero = True
+    try:
+        if n_treatment > 0 and n_control > 0:
+            se = math.sqrt(
+                treatment * (1 - treatment) / n_treatment
+                + control * (1 - control) / n_control
+            )
+            diff = treatment - control
+            z = 1.959964  # 95% 양측
+            ci_low_pp = (diff - z * se) * 100
+            ci_high_pp = (diff + z * se) * 100
+            ci_includes_zero = ci_low_pp <= 0.0 <= ci_high_pp
+    except Exception:
+        ci_low_pp = ci_high_pp = 0.0
+        ci_includes_zero = True
+
+    # 통계적 유의성 (p < 0.05) — 보조 지표
     is_significant = input.p_value < 0.05
 
     # 검정력 분석
@@ -94,6 +113,7 @@ def analyze_stats(input: ABTestInput) -> StatisticalResult:
     # 통계 요약 (raw 수치)
     interpretation = (
         f"effect_size_pp={effect_size_pp:+.2f}pp, "
+        f"ci95_pp=[{ci_low_pp:+.2f}, {ci_high_pp:+.2f}], "
         f"effect_size_relative={effect_size_relative_pct:+.1f}%, "
         f"p_value={input.p_value:.4f}, "
         f"power={power_pct:.1f}%, "
@@ -105,6 +125,9 @@ def analyze_stats(input: ABTestInput) -> StatisticalResult:
     return StatisticalResult(
         effect_size_pp=effect_size_pp,
         effect_size_relative_pct=effect_size_relative_pct,
+        ci_low_pp=ci_low_pp,
+        ci_high_pp=ci_high_pp,
+        ci_includes_zero=ci_includes_zero,
         is_significant=is_significant,
         power_pct=power_pct,
         srm_detected=srm_detected,

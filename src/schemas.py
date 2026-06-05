@@ -29,7 +29,11 @@ class ABTestInput(BaseModel):
 class StatisticalResult(BaseModel):
     effect_size_pp: float = Field(..., description="효과 크기 (percentage points, treatment - control)")
     effect_size_relative_pct: float = Field(..., description="상대적 효과 크기 (%)")
-    is_significant: bool = Field(..., description="통계적 유의성 여부 (p < 0.05)")
+    # 효과크기 중심 보고: p값(이분법 유의성)보다 신뢰구간을 우선 노출
+    ci_low_pp: float = Field(0.0, description="효과 크기 95% 신뢰구간 하한 (pp)")
+    ci_high_pp: float = Field(0.0, description="효과 크기 95% 신뢰구간 상한 (pp)")
+    ci_includes_zero: bool = Field(True, description="95% CI가 0을 포함하는지(효과 방향 불확실)")
+    is_significant: bool = Field(..., description="통계적 유의성 여부 (p < 0.05) — 보조 지표")
     power_pct: float = Field(..., description="검정력 (%)")
     srm_detected: bool = Field(..., description="Sample Ratio Mismatch 감지 여부")
     srm_detail: Optional[str] = Field(None, description="SRM 상세 정보")

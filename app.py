@@ -764,13 +764,14 @@ def render_stats(stats, t: dict):
         )
 
     with col2:
+        # 효과크기 중심: p값(이전 placeholder 버그) 대신 95% 신뢰구간을 헤드라인으로
         st.metric(
-            "P-Value",
-            f"{stats.effect_size_pp:.4f}" if False else f"p={0.0:.4f}",  # 실제 p_value는 입력에서
-            label_visibility="visible",
+            t["ci_95"],
+            f"[{stats.ci_low_pp:+.2f}, {stats.ci_high_pp:+.2f}]pp",
         )
+        ci_note = t["ci_includes_zero"] if stats.ci_includes_zero else t["ci_excludes_zero"]
         sig_label = t["significant"] if stats.is_significant else t["not_significant"]
-        st.caption(sig_label)
+        st.caption(f"{ci_note} · {sig_label}")
 
     with col3:
         power_color = "normal" if stats.power_pct >= 80 else "inverse"

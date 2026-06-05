@@ -58,7 +58,8 @@ def _build_user_message(input: ABTestInput, stats: StatisticalResult, lang: str)
 
 ## 통계 분석 결과
 - 효과 크기: {stats.effect_size_pp:+.2f}pp ({stats.effect_size_relative_pct:+.1f}% 상대 변화)
-- 통계적 유의성: {'유의함 (p<0.05)' if stats.is_significant else '유의하지 않음 (p≥0.05)'}
+- 효과 크기 95% 신뢰구간: [{stats.ci_low_pp:+.2f}, {stats.ci_high_pp:+.2f}]pp {'(0 포함)' if stats.ci_includes_zero else '(0 미포함)'}
+- (보조) 통계적 유의성: {'유의 (p<0.05)' if stats.is_significant else '비유의 (p≥0.05)'}
 - 검정력: {stats.power_pct:.1f}%
 - SRM 감지: {'예' if stats.srm_detected else '아니오'}
 {f'- SRM 상세: {stats.srm_detail}' if stats.srm_detail else ''}"""
@@ -82,7 +83,8 @@ def _build_user_message(input: ABTestInput, stats: StatisticalResult, lang: str)
 
 ## Statistical Analysis Results
 - Effect Size: {stats.effect_size_pp:+.2f}pp ({stats.effect_size_relative_pct:+.1f}% relative change)
-- Statistical Significance: {'Significant (p<0.05)' if stats.is_significant else 'Not significant (p≥0.05)'}
+- Effect Size 95% CI: [{stats.ci_low_pp:+.2f}, {stats.ci_high_pp:+.2f}]pp {'(includes 0)' if stats.ci_includes_zero else '(excludes 0)'}
+- (secondary) Statistical Significance: {'Significant (p<0.05)' if stats.is_significant else 'Not significant (p≥0.05)'}
 - Statistical Power: {stats.power_pct:.1f}%
 - SRM Detected: {'Yes' if stats.srm_detected else 'No'}
 {f'- SRM Detail: {stats.srm_detail}' if stats.srm_detail else ''}"""

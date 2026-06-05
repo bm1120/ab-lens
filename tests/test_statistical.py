@@ -168,6 +168,34 @@ class TestEffectSizeCalculation:
         assert "srm" in result.interpretation
 
 
+class TestConfidenceInterval:
+    """효과크기 95% 신뢰구간 (효과크기 중심 보고)"""
+
+    def test_clear_win_ci_excludes_zero(self):
+        """명확한 승리(+5pp, n=10000) → CI가 0을 배제하고 하한>0"""
+        result = analyze_stats(load_scenario("clear_win"))
+        assert result.ci_includes_zero is False
+        assert result.ci_low_pp > 0
+        # 점추정(5pp)이 CI 안에 있어야
+        assert result.ci_low_pp <= result.effect_size_pp <= result.ci_high_pp
+
+    def test_ci_low_le_high(self):
+        """CI 하한 ≤ 상한 (모든 시나리오 불변식)"""
+        for name in ("clear_win", "clear_loss", "inconclusive"):
+            r = analyze_stats(load_scenario(name))
+            assert r.ci_low_pp <= r.ci_high_pp
+
+    def test_ci_includes_zero_flag_consistent(self):
+        """ci_includes_zero 플래그가 경계와 일관"""
+        r = analyze_stats(load_scenario("inconclusive"))
+        assert r.ci_includes_zero == (r.ci_low_pp <= 0.0 <= r.ci_high_pp)
+
+    def test_interpretation_contains_ci(self):
+        """interpretation raw 요약에 ci95 포함"""
+        r = analyze_stats(load_scenario("clear_win"))
+        assert "ci95_pp" in r.interpretation
+
+
 class TestNoExperiment:
     """무작위 배정 없는 시나리오 테스트"""
 
