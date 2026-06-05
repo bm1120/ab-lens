@@ -60,11 +60,11 @@ def _build_user_message(
 - 다중 메트릭: {'예' if input.multiple_metrics else '아니오'}
 - 비즈니스 맥락: {input.business_context or '없음'}
 
-## 통계 분석 결과
+## 통계 분석 결과 (효과크기 중심)
 - 효과 크기: {stats.effect_size_pp:+.2f}pp ({stats.effect_size_relative_pct:+.1f}% 상대 변화)
-- 통계적 유의성: {'유의함 (p<0.05)' if stats.is_significant else '유의하지 않음 (p≥0.05)'}
-- P-Value: {input.p_value:.4f}
+- 효과 크기 95% 신뢰구간: [{stats.ci_low_pp:+.2f}, {stats.ci_high_pp:+.2f}]pp {'— 0 포함(효과 방향 불확실)' if stats.ci_includes_zero else '— 0 미포함(방향 일관)'}
 - 검정력: {stats.power_pct:.1f}%
+- (보조) 통계적 유의성: {'유의 (p<0.05)' if stats.is_significant else '비유의 (p≥0.05)'}, p={input.p_value:.4f} — ※p값은 보조 지표일 뿐, 효과크기·신뢰구간·실질적 유의성을 우선 판단
 - SRM: {'감지됨 ⚠️' if stats.srm_detected else '정상'}
 {f'- SRM 상세: {stats.srm_detail}' if stats.srm_detail else ''}
 {f'- 추가 필요 샘플: {stats.additional_sample_needed:,}' if stats.additional_sample_needed else ''}
@@ -85,11 +85,11 @@ def _build_user_message(
 - Multiple Metrics: {'Yes' if input.multiple_metrics else 'No'}
 - Business Context: {input.business_context or 'None'}
 
-## Statistical Analysis Results
+## Statistical Analysis Results (effect-size-centered)
 - Effect Size: {stats.effect_size_pp:+.2f}pp ({stats.effect_size_relative_pct:+.1f}% relative change)
-- Statistical Significance: {'Significant (p<0.05)' if stats.is_significant else 'Not significant (p≥0.05)'}
-- P-Value: {input.p_value:.4f}
+- Effect Size 95% CI: [{stats.ci_low_pp:+.2f}, {stats.ci_high_pp:+.2f}]pp {'— includes 0 (direction uncertain)' if stats.ci_includes_zero else '— excludes 0 (consistent direction)'}
 - Statistical Power: {stats.power_pct:.1f}%
+- (secondary) Statistical Significance: {'Significant (p<0.05)' if stats.is_significant else 'Not significant (p≥0.05)'}, p={input.p_value:.4f} — Note: p-value is secondary; prioritize effect size, CI, and practical significance
 - SRM: {'Detected ⚠️' if stats.srm_detected else 'OK'}
 {f'- SRM Detail: {stats.srm_detail}' if stats.srm_detail else ''}
 {f'- Additional Sample Needed: {stats.additional_sample_needed:,}' if stats.additional_sample_needed else ''}
