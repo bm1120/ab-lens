@@ -102,7 +102,8 @@ def run_quality_loop(
                 refinement=refinement, prev_hypothesis=prev, domain=domain,
             )
             emit(f"sharpener#{turn}")
-            judgment = judge_fn(hyp, api_key=api_key, provider=provider, lang=lang, model=model)
+            # 판정은 생성 model을 안 받음 → provider별 Haiku temp=0으로 고정(T1c 검증, 비용·재현성 보존).
+            judgment = judge_fn(hyp, api_key=api_key, provider=provider, lang=lang)
             sc = score_hypothesis(hyp, judgment, lang=lang)
             emit(f"scorecard#{turn}:{sc.grade}({sc.total})")
             pairs.append((hyp, sc))

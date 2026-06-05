@@ -13,7 +13,7 @@ import re
 from typing import Callable, Optional
 
 from src.design_schemas import HypothesisOutput
-from src.llm_client import LLMProvider
+from src.llm_client import LLMProvider, judge_model_for
 from src.hypothesis.scorecard_lexicons import (
     direction_rx, judge_prompt_template, judge_system, norm_token,
     vague_metric_set, vague_terms_set,
@@ -122,7 +122,13 @@ def judge_hypothesis(
     lang: str = "ko", model: Optional[str] = None,
     _call: Optional[Callable] = None,
 ) -> LLMJudgment:
-    """룰 가이드 LLM judge — 턴당 1회. _call 주입 시 테스트용 mock."""
+    """룰 가이드 LLM judge — 턴당 1회. _call 주입 시 테스트용 mock.
+
+    판정은 생성/구체화와 분리: `model=None`이면 provider별 저비용·결정론 Haiku로 고정
+    (T1c 검증). 사용자가 생성을 Opus로 올려도 판정은 Haiku temp=0 유지 → 비용·재현성 보존.
+    명시적으로 `model`을 넘기면 그 모델을 존중(오버라이드 탈출구).
+    """
+    eff_model = model or judge_model_for(provider)
     prompt = judge_prompt_template(lang).format(
         sharpened_hypothesis=h.sharpened_hypothesis, mechanism_path=h.mechanism_path,
         jtbd_reframe=h.jtbd_reframe, primary_metric=h.suggested_primary_metric,
@@ -136,7 +142,8 @@ def judge_hypothesis(
         _call = call_structured
     try:
         return _call(prompt=prompt, system=judge_system(lang), schema=LLMJudgment,
-                     api_key=api_key, provider=provider, lang=lang, model=model)
+                     api_key=api_key, provider=provider, lang=lang, model=eff_model,
+                     temperature=0.0)   # 결정론 판정 → 재현성↑ (T1c: 게이트 흔들림 완화)
     except Exception as e:   # API 오류·timeout·validation 실패 → 비관적 폴백(전부 N), 파이프라인 보호
         import logging
         logging.getLogger(__name__).warning("HQS LLM judge 실패 → 비관적 폴백(N): %s", e)
