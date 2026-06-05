@@ -7,6 +7,32 @@ from __future__ import annotations
 
 from src.design_schemas import DesignContext, HypothesisOutput
 
+_KIND_LABEL = {
+    "effect_size": "효과크기 중심성",
+    "goodhart": "Goodhart(지표 게이밍)",
+    "fwer": "FWER(다중검정)",
+    "proxy": "대리지표 괴리",
+    "guardrail": "guardrail 누락",
+}
+_SEV_ICON = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+
+
+def _render_metric_review(ctx: DesignContext) -> str:
+    mr = ctx.metric_review
+    if mr is None or not mr.risks:
+        return ""
+    lines = []
+    for r in mr.risks:
+        label = _KIND_LABEL.get(r.kind, r.kind)
+        icon = _SEV_ICON.get(r.severity, "🟡")
+        lines.append(f"- {icon} **[{label}] {r.metric}** — {r.note}")
+    body = "\n".join(lines)
+    summary = f"\n\n> {mr.summary}" if mr.summary else ""
+    return f"""
+
+## 지표 리스크 검토 (DesignAgent · advisory)
+{body}{summary}"""
+
 
 def render_design_doc(ctx: DesignContext, hyp: HypothesisOutput) -> str:
     secondary = ", ".join(hyp.suggested_secondary_metrics) or "—"
@@ -60,6 +86,7 @@ def render_design_doc(ctx: DesignContext, hyp: HypothesisOutput) -> str:
 ## 설계 품질
 - 필수 통과: {"✅" if ctx.design_quality.required_pass else "🔴"}
 - 권고 점수: {ctx.design_quality.advisory_score}/100
+{_render_metric_review(ctx)}
 
 ---
 > 이 설계서와 함께 다운로드한 `ab-design-context.json` 을 결과 분석 탭에 업로드하면,

@@ -23,6 +23,7 @@ from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.hypothesis.quality_loop import run_quality_loop
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
+from src.design.metric_review import review_metrics
 from src.llm_client import (
     CLAUDE_CODE_MODELS,
     ANTHROPIC_MODELS,
@@ -546,7 +547,14 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 experiment_duration_days=int(duration),
                 icc=icc_in if icc_in > 0 else None, stop_criteria=stop,
             )
-            ctx = assemble_design_context(hyp, result.bias_screen, facts)
+            # DesignAgent LLM 지표검토 (advisory, 비차단 — 실패 시 내부 폴백으로 빈 리뷰)
+            with st.spinner("지표 리스크 검토 중…" if ko else "Reviewing metric risks…"):
+                metric_review = review_metrics(
+                    hyp, metric_type=metric_type, api_key=api_key,
+                    provider=provider, lang=lang, model=model,
+                )
+            ctx = assemble_design_context(hyp, result.bias_screen, facts,
+                                          metric_review=metric_review)
             st.session_state.design_context = ctx
             st.session_state.design_doc_md = render_design_doc(ctx, hyp)
         except Exception as e:
