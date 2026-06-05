@@ -132,9 +132,11 @@ def test_clear_loss():
     assert stats.is_significant
     assert stats.effect_size_pp < 0
     rec_lower = rec.final_recommendation.lower()
-    # 음의 효과 → 즉시/단독 출시 추천이 아니어야 함 (조건부/추가실험은 허용)
-    assert not any(kw in rec_lower for kw in ["즉시 출시", "바로 출시", "전면 출시",
-                                               "immediate launch", "full launch"])
+    # 음의 효과 → 중단/롤백/추가실험/조건부 등 '신중 행동'을 권고해야 함.
+    # (출시 키워드 블록리스트는 "전면 출시를 권하지 않음" 같은 부정문을 오탐 → 긍정 신호로 검증)
+    caution_kw = ["추가 실험", "추가실험", "중단", "롤백", "보류", "조건부", "재실험", "되돌", "권장하지",
+                  "further", "rollback", "hold", "do not", "not launch", "conditional", "discontinue"]
+    assert any(kw in rec_lower for kw in caution_kw), rec.final_recommendation
 
 
 # ── 시나리오 3: inconclusive ──────────────────────────────────────────────────
