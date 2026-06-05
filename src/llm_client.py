@@ -61,6 +61,22 @@ OPENROUTER_MODELS: list[str] = [
     # Meta
     "meta-llama/llama-3.3-70b-instruct",
 ]
+# ── 판정(judge) 전용 모델 ──────────────────────────────────────────────────
+# HQS LLM judge는 룰 가이드 Y/P/N 분류 + temperature=0 결정론이라 Haiku로 충분(T1c 검증: 게이트 97%).
+# 생성/구체화는 사용자가 고른 모델(추론 집약)을 쓰되, 판정만 항상 저비용·결정론 Haiku로 고정.
+_JUDGE_MODEL_BY_PROVIDER: dict[LLMProvider, str] = {
+    LLMProvider.CLAUDE_CODE: "claude-haiku-4-5-20251001",
+    LLMProvider.ANTHROPIC: "claude-haiku-4-5-20251001",
+    LLMProvider.OPENROUTER: "anthropic/claude-haiku-4.5",
+}
+JUDGE_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
+
+
+def judge_model_for(provider) -> str:
+    """판정 전용 Haiku 모델 ID (provider별 표기 차이 반영). provider 불명 시 기본 Haiku."""
+    return _JUDGE_MODEL_BY_PROVIDER.get(provider, JUDGE_MODEL_DEFAULT)
+
+
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
 MAX_TOKENS = 4096  # HypothesisOutput 등 큰 구조화 출력이 잘리지 않도록
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"

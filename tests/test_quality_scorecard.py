@@ -222,6 +222,41 @@ def test_judge_uses_temperature_zero():
     assert captured.get("temperature") == 0.0
 
 
+def test_judge_pins_to_haiku_regardless_of_generation_model():
+    # 생성 model을 안 넘기면 판정은 provider별 Haiku로 고정 (역할 분리: 생성↑ 판정은 저비용·결정론).
+    from src.hypothesis.quality_scorecard import judge_hypothesis
+    from src.schemas import LLMProvider
+
+    cap = {}
+
+    def grab(**kw):
+        cap.update(kw)
+        return LLMJudgment()
+
+    judge_hypothesis(mk_hyp(), api_key="k", provider=LLMProvider.CLAUDE_CODE, _call=grab)
+    assert cap["model"] == "claude-haiku-4-5-20251001"
+
+    cap.clear()
+    judge_hypothesis(mk_hyp(), api_key="k", provider=LLMProvider.OPENROUTER, _call=grab)
+    assert cap["model"] == "anthropic/claude-haiku-4.5"
+
+
+def test_judge_explicit_model_overrides_pin():
+    # 명시적 model은 존중(오버라이드 탈출구).
+    from src.hypothesis.quality_scorecard import judge_hypothesis
+    from src.schemas import LLMProvider
+
+    cap = {}
+
+    def grab(**kw):
+        cap.update(kw)
+        return LLMJudgment()
+
+    judge_hypothesis(mk_hyp(), api_key="k", provider=LLMProvider.CLAUDE_CODE,
+                     model="claude-opus-4-8", _call=grab)
+    assert cap["model"] == "claude-opus-4-8"
+
+
 def test_stall_gate_failed_stays_redesign():
     # 게이트 결격으로 정체 종료 시 soft pass 아님 → REDESIGN (Gemini #1)
     bad = score_hypothesis(mk_hyp(suggested_primary_metric="성공"), mk_judge())  # gate fail

@@ -165,6 +165,14 @@ def render_sidebar() -> tuple[str, str, LLMProvider, str]:
             options=model_options,
             index=model_options.index(model_defaults),
         )
+        model_hint = (
+            "생성·구체화에만 적용됩니다. 품질 판정(스코어카드)은 항상 Haiku temp=0으로 고정 — "
+            "추론이 필요한 가설 생성은 Sonnet/Opus를 권장."
+            if lang == "ko" else
+            "Applies to generation/refinement only. Quality judging is always pinned to "
+            "Haiku temp=0. Use Sonnet/Opus for reasoning-heavy hypothesis generation."
+        )
+        st.caption(model_hint)
 
         st.divider()
 

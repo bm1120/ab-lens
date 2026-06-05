@@ -29,5 +29,17 @@
 2. clarity(83%)·alt_justified(87%)는 **비게이트 등급 차원**이라 등급 지터만 유발(통과/탈락 결정 아님). 허용 가능.
 3. 추가 안정화가 필요하면(선택): ①게이트 필드에 **다수결 3회**(비용 3배) ②judge 모델을 **sonnet**으로(haiku 대비 ↑). 현재 temperature=0로 충분.
 
+## 후속(T1c-followup) — 판정/생성 모델 분리
+
+T1c 재현성은 **Haiku 기준**으로 측정됐다. 사용자가 생성 품질을 위해 모델을 Sonnet/Opus로 올리면
+판정도 같이 끌려가 이 검증 전제가 깨지는 문제가 있었다(단일 셀렉터 커플링).
+
+**해결**: 판정을 생성과 분리. `judge_hypothesis(model=None)`이면 `llm_client.judge_model_for(provider)`로
+**provider별 Haiku를 고정**(CLAUDE_CODE/ANTHROPIC=`claude-haiku-4-5-20251001`, OPENROUTER=`anthropic/claude-haiku-4.5`).
+`quality_loop`는 판정에 생성 model을 더 이상 넘기지 않는다. 명시적 model 전달 시에만 오버라이드.
+
+- 효과: 생성=사용자 선택(추론↑), 판정=항상 Haiku temp=0(T1c 검증값·저비용·결정론 보존, 루프 매 턴 비용 폭증 방지).
+- 회귀: `test_judge_pins_to_haiku_regardless_of_generation_model`, `test_judge_explicit_model_overrides_pin`.
+
 ## 봉인 해제 상태
 §8.3 "LLM 이진 판정 재현성 미검증" → **측정 완료**. 게이트는 명확 케이스 100%·경계 80%, temperature=0 적용. 절대임계(80/68)는 여전히 봉인(별도 캘리브레이션 필요).
