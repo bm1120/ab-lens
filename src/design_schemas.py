@@ -64,14 +64,14 @@ class MetricRisk(BaseModel):
     """DesignAgent LLM 지표검토 한 건 — 정성 코멘트(advisory). 수치 생성 금지."""
 
     metric: str = "(전체)"               # 어느 지표에 대한 지적 (전반이면 "(전체)")
-    kind: Literal["goodhart", "fwer", "proxy", "guardrail"] = "goodhart"
+    kind: Literal["effect_size", "goodhart", "fwer", "proxy", "guardrail"] = "goodhart"
     severity: Literal["low", "medium", "high"] = "medium"
     note: str = ""                       # 위험 설명 + 완화 권고
 
     @field_validator("kind", mode="before")
     @classmethod
     def _coerce_kind(cls, v):
-        return v if v in ("goodhart", "fwer", "proxy", "guardrail") else "goodhart"
+        return v if v in ("effect_size", "goodhart", "fwer", "proxy", "guardrail") else "goodhart"
 
     @field_validator("severity", mode="before")
     @classmethod

@@ -8,6 +8,7 @@ from __future__ import annotations
 from src.design_schemas import DesignContext, HypothesisOutput
 
 _KIND_LABEL = {
+    "effect_size": "효과크기 중심성",
     "goodhart": "Goodhart(지표 게이밍)",
     "fwer": "FWER(다중검정)",
     "proxy": "대리지표 괴리",

@@ -14,11 +14,17 @@ from src.design_schemas import HypothesisOutput, MetricReview
 from src.llm_client import LLMProvider
 
 # ── i18n 프롬프트 ────────────────────────────────────────────────────────────
+# 통계 철학: p값(이분법적 유의성)보다 **효과크기·실질적 유의성·신뢰구간**을 중심에 둔다.
+# 다중검정 위양성(FWER)은 실재하나, 조정의 무게중심은 "p값을 깎기"가 아니라
+# "합의 MDE 대비 효과크기를 추정하기"에 둔다(추정 사고 > 이분법적 검정).
 _SYSTEM = {
     "ko": "너는 A/B 실험 설계 검토자다. 지표 *구성*의 위험만 정성적으로 지적한다. "
-          "표본수·p값·효과크기 같은 숫자를 새로 만들지 마라. 차단이 아니라 권고다.",
+          "통계 판단은 p값(이분법적 유의성)보다 **효과크기·실질적 유의성(합의 MDE 대비 크기)·"
+          "신뢰구간**을 중심에 둔다. 표본수·p값 같은 구체 숫자를 새로 만들지 마라. 차단이 아니라 권고다.",
     "en": "You are an A/B experiment design reviewer. Critique only the *composition* of "
-          "metrics, qualitatively. Never invent numbers (sample size, p-values, effect size). "
+          "metrics, qualitatively. Center statistical judgment on **effect size, practical "
+          "significance (magnitude vs the agreed MDE), and confidence intervals** rather than "
+          "p-values (binary significance). Never invent concrete numbers (sample size, p-values). "
           "This is advisory, not blocking.",
 }
 
@@ -30,11 +36,18 @@ _PROMPT = {
 - 부작용 감시 지표(tradeoff/guardrail, {n_tradeoff}개): {tradeoff}
 - 지표 타입: {metric_type}
 
+판단 원칙: **효과크기 중심**. p<0.05 여부보다 "효과크기가 합의 MDE(실질적으로 의미 있는
+최소 크기)를 넘는가, 신뢰구간이 그 경계를 포함/배제하는가"로 평가하라.
+
 다음 관점으로 각 위험을 risks 배열에 담아라(kind 값 사용):
+- "effect_size": 설계가 효과크기·실질적 유의성보다 통계적 유의성(p값)에 치우칠 위험.
+  예: 표본이 크면 MDE 미만의 사소한 효과도 p<0.05가 됨 → 1차 지표에 "실질적으로 의미 있는
+  최소 효과크기(=합의 MDE)"를 명시하고 결과를 효과크기+신뢰구간으로 보고하도록 권고.
+- "fwer": 2차 지표가 여러 개({n_secondary}개)면 다중검정으로 위양성이 늘 수 있음. 단,
+  무게중심은 p값 보정이 아니라 **추정**에 둔다 — 1차 지표 단일 사전등록 + 효과크기 타깃을
+  우선하고, 2차 지표는 탐색적으로(효과크기+신뢰구간 보고) 다뤄라. 보정(BH 등)은 보조.
 - "goodhart": 1차/2차 지표가 대리지표로 게이밍되어 진짜 목표와 어긋날 위험
   (예: 클릭률만 올리고 전환·체류는 악화).
-- "fwer": 2차 지표가 여러 개({n_secondary}개)면 다중검정으로 위양성(1종 오류)이 팽창.
-  Bonferroni/Benjamini-Hochberg 같은 보정 또는 1차 지표 단일 검정 우선을 권고.
 - "proxy": 1차 지표가 비즈니스 진짜 목표의 약한 대리지표인 경우.
 - "guardrail": 부작용을 잡을 guardrail/tradeoff 지표가 비어있거나 부족한 경우.
 
@@ -48,12 +61,21 @@ summary 에 1~2문장 총평을 한국어로 써라. 숫자를 새로 만들지 
 - Tradeoff/guardrail ({n_tradeoff}): {tradeoff}
 - Metric type: {metric_type}
 
+Guiding principle: **effect-size-centered**. Judge by "does the effect size exceed the
+agreed MDE (the minimum practically meaningful magnitude), and does the confidence interval
+include/exclude that threshold" rather than whether p < 0.05.
+
 Put each risk in the risks array using these kind values:
+- "effect_size": the design over-indexes on statistical significance (p-values) instead of
+  effect size / practical significance. E.g. with a large sample a trivial effect below the
+  MDE still hits p<0.05 → recommend stating a "minimum practically meaningful effect size
+  (= agreed MDE)" for the primary metric and reporting results as effect size + CI.
+- "fwer": several secondary metrics ({n_secondary}) can inflate false positives under
+  multiple comparisons. But center the fix on **estimation**, not p-value correction —
+  prefer a single pre-registered primary with an effect-size target, and treat secondary
+  metrics as exploratory (report effect sizes + CIs). Correction (BH, etc.) is secondary.
 - "goodhart": primary/secondary metric gameable as a proxy, diverging from the true goal
   (e.g. lifting CTR while hurting conversion/retention).
-- "fwer": with several secondary metrics ({n_secondary}), multiple comparisons inflate
-  false positives. Recommend Bonferroni/Benjamini-Hochberg correction or a single
-  pre-registered primary test.
 - "proxy": the primary metric is a weak proxy for the real business goal.
 - "guardrail": missing or insufficient guardrail/tradeoff metrics to catch side effects.
 

@@ -53,6 +53,13 @@ def test_review_empty_default():
     assert mr.risks == [] and mr.summary == ""
 
 
+def test_risk_accepts_effect_size_kind():
+    # 효과크기 중심 — effect_size 는 일급 kind (p값 보정보다 효과크기 추정 우선)
+    r = MetricRisk(metric="전환율", kind="effect_size", severity="high",
+                   note="MDE 미만 효과도 p<0.05 가능 → 효과크기+CI 보고 권고")
+    assert r.kind == "effect_size"
+
+
 # ── 호출 계약 ─────────────────────────────────────────────────────────
 def test_review_passes_counts_and_uses_temp_zero():
     cap = {}
@@ -67,6 +74,22 @@ def test_review_passes_counts_and_uses_temp_zero():
     assert cap["temperature"] == 0.0
     # 2차 지표 3개가 프롬프트에 반영(FWER 신호)
     assert "3" in cap["prompt"]
+
+
+def test_prompt_centers_effect_size_over_pvalue():
+    # 통계 철학: p값 보정보다 효과크기·MDE·신뢰구간 중심
+    cap = {}
+
+    def grab(**kw):
+        cap.update(kw)
+        return MetricReview()
+
+    review_metrics(mk_hyp(), metric_type="proportion", api_key="k", provider=None, _call=grab)
+    p, s = cap["prompt"], cap["system"]
+    assert "효과크기" in p and "MDE" in p and "신뢰구간" in p
+    assert "effect_size" in p            # 일급 kind 안내 포함
+    assert "추정" in p                    # FWER 무게중심 = 추정(보정 아님)
+    assert "효과크기" in s                 # system 도 효과크기 중심 명시
 
 
 def test_review_respects_selected_model_not_pinned():
