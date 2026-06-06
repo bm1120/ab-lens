@@ -22,6 +22,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# golden: 실LLM 골든셋 회귀(느림/토큰 필요). 평소 제외, 수동 `pytest -m golden`.
+addopts = "-m 'not golden'"
+markers = [
+    "golden: 실LLM 프롬프트 품질 골든셋 회귀 (CLAUDE_CODE_OAUTH_TOKEN 필요)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
