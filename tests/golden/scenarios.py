@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from src.hypothesis.bias_screener import screen_bias
+from src.hypothesis.classify import classify_construct
+from src.hypothesis.measurement import propose_measurement
 from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.hypothesis.quality_scorecard import judge_hypothesis, score_hypothesis
 from src.hypothesis.trivial_router import route_trivial
@@ -95,6 +97,31 @@ def _check_saas(key: str) -> bool:
     return (not r.trivial) and r.hypothesis is not None and _gate_passed(r.hypothesis, key)
 
 
+# ── 9~11. 개념→조작 정의화 (P1/P4) ──────────────────────────────────────
+def _check_classify_clear(key: str) -> bool:
+    c = classify_construct("결제 버튼을 상단으로 옮기면 체크아웃 전환율이 오른다",
+                           api_key=key, provider=PROVIDER)
+    return c.kind == "clear"
+
+
+def _check_classify_abstract(key: str) -> bool:
+    c = classify_construct("브랜드 인지도를 높이면 장기적으로 전체 매출이 늘어날 것이다",
+                           api_key=key, provider=PROVIDER)
+    return c.kind in ("abstract", "mixed") and len(c.constructs) >= 1
+
+
+def _check_measurement_compatible(key: str) -> bool:
+    # 추상 개념 → 개념정의 + 탭2 호환(ab_testable) 지표 후보 ≥1
+    m = propose_measurement("브랜드 인지도를 높이면 장기 매출이 는다", ["브랜드 인지도"],
+                            "이커머스 웹사이트", api_key=key, provider=PROVIDER)
+    if not m.measurements:
+        return False
+    cm = m.measurements[0]
+    has_compat = any(c.ab_testable and c.metric_type in ("proportion", "continuous", "count")
+                     for c in cm.candidates)
+    return bool(cm.conceptual_definition.strip()) and has_compat
+
+
 SCENARIOS: list[GoldenScenario] = [
     GoldenScenario("trivial", "trivial → Just Do It", _check_trivial),
     GoldenScenario("clear", "명확 가설 → 게이트 통과", _check_clear),
@@ -104,4 +131,7 @@ SCENARIOS: list[GoldenScenario] = [
     GoldenScenario("team_agreed", "팀합의 → 게이트 통과", _check_team_agreed),
     GoldenScenario("ecommerce", "도메인:이커머스 → 게이트 통과", _check_ecommerce),
     GoldenScenario("saas", "도메인:SaaS → 게이트 통과", _check_saas),
+    GoldenScenario("classify_clear", "명확 입력 → clear 분류", _check_classify_clear),
+    GoldenScenario("classify_abstract", "추상 입력 → abstract/mixed + 구성개념", _check_classify_abstract),
+    GoldenScenario("measurement_compatible", "추상 → 개념정의+탭2호환 지표 후보", _check_measurement_compatible),
 ]
