@@ -28,6 +28,7 @@ class ConstructMeasurement(BaseModel):
     conceptual_definition: str          # 사용자 편집 대상
     candidates: list[MetricCandidate]
     incompatible_note: str = ""         # 비호환 지표·인과대안 안내
+    proxy_warning: str = ""             # 단기 행동지표가 장기 구성개념의 대리일 때 Goodhart 경고
 
 
 class MeasurementProposal(BaseModel):
@@ -52,6 +53,31 @@ def _build_prompt(idea: str, constructs: list[str], domain_context: str) -> str:
     )
 
 
+# A/B로 직접 측정 어려운 신호 → 후처리로 ab_testable=False 강제 (리뷰 A: LLM이 3종에 끼워맞춤 방지)
+_INCOMPAT_SIGNALS = (
+    "설문", "survey", "recall", "회상", "장기", "long-term", "long term",
+    "brand lift", "브랜드 리프트", "cross-channel", "크로스채널", "attribution",
+    "귀인", "nps", "리커트", "likert", "self-report", "자기보고",
+)
+_FALLBACK_Q = "어떤 채널·이벤트로 측정할 수 있나요? (예: 사이트 내 검색 / 광고 클릭 / 직접 방문 / 재구매)"
+
+
+def _post_process(proposal: MeasurementProposal, domain_context: str) -> MeasurementProposal:
+    """리뷰 반영: 비호환 신호 → ab_testable=False 강제 + needs_question deterministic 보정."""
+    for cm in proposal.measurements:
+        for c in cm.candidates:
+            blob = f"{c.label} {c.rationale}".lower()
+            if any(sig.lower() in blob for sig in _INCOMPAT_SIGNALS):
+                c.ab_testable = False
+    has_incompat = any(not c.ab_testable for cm in proposal.measurements for c in cm.candidates)
+    # 도메인 맥락이 없거나 비호환 후보가 섞이면 멀티턴 질문 트리거(LLM 자기판단에만 의존 안 함)
+    if not domain_context.strip() or has_incompat:
+        proposal.needs_question = True
+        if not proposal.question.strip():
+            proposal.question = _FALLBACK_Q
+    return proposal
+
+
 def propose_measurement(
     idea: str,
     constructs: list[str],
@@ -63,8 +89,13 @@ def propose_measurement(
     model: Optional[str] = None,
 ) -> MeasurementProposal:
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
-    return call_structured(
-        prompt=_build_prompt(idea, constructs, domain_context),
-        system=system, schema=MeasurementProposal,
-        api_key=api_key, provider=provider, lang=lang, model=model,
-    )
+    try:
+        proposal = call_structured(
+            prompt=_build_prompt(idea, constructs, domain_context),
+            system=system, schema=MeasurementProposal,
+            api_key=api_key, provider=provider, lang=lang, model=model,
+        )
+    except Exception:
+        # graceful degradation: 크래시 대신 사용자에게 무엇이 필요한지 되묻기 (리뷰 B)
+        return MeasurementProposal(measurements=[], needs_question=True, question=_FALLBACK_Q)
+    return _post_process(proposal, domain_context)
