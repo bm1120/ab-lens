@@ -307,6 +307,11 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         else:
             st.caption("단일 provider 멀티-롤 (다양성은 롤에서). 키 추가 시 벤더 분산." if ko
                        else "Single-provider multi-role. Add keys for vendor diversity.")
+        st.caption("⚡ 빠른 초안 모드 — 추상 구성개념의 측정 타당도 확인(개념→조작 정의화)은 미적용. "
+                   "추상 개념은 '가설 고도화(quality loop)' 경로를 권장합니다."
+                   if ko else
+                   "⚡ Fast draft — no measurement-validity check for abstract constructs. "
+                   "For abstract ideas, prefer the quality-loop path.")
 
     def _store(result, used_idea):
         st.session_state.hyp_result = result
@@ -511,7 +516,17 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                         on_progress=lambda node: status.write(f"✓ {node}"), model=model,
                     )
                     status.update(label="완료" if ko else "Done", state="complete")
-                _store(result, idea)
+                # 단순 경로도 추상 구성개념이면 측정 확인 패널로 (use_loop과 동일 게이트 — 비일관 해소)
+                if result.needs_measurement and result.measurement is not None:
+                    st.session_state["measurement_pending"] = {
+                        "idea": idea, "mode": mode, "state": state, "domain": "",
+                        "constructs": (result.classification.constructs if result.classification else []) or [idea],
+                        "rationale": result.classification.rationale if result.classification else "",
+                        "proposal": result.measurement.model_dump(),
+                    }
+                    st.rerun()
+                else:
+                    _store(result, idea)
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
                 return

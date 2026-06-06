@@ -120,8 +120,16 @@ def sharpen(..., pinned_metrics: PinnedMetrics | None = None):
 - **P5 스킬화**: P1~P4에서 반복한 멀티모델 리뷰 워크플로를 `~/.claude/skills/multi-model-review`로 패키징.
 - 종료: feature 브랜치 → **PR 생성**(머지는 사용자 확인 후).
 
+## 경로별 측정확인 적용 (P4 리뷰 반영)
+
+- **quality-loop 경로**: 측정확인 게이트 적용(개념→조작 정의화 + pinned).
+- **단순(run_hypothesis_pipeline) 경로**: abstract면 동일 측정확인 패널로 라우팅(비일관 해소).
+- **diverse(다양생성) 경로**: "⚡ 빠른 초안" — 측정확인 미적용(UI 명시). 브레인스토밍 목적.
+  추상 개념은 quality-loop 경로 권장. (초안→탭2 이월 시 가드레일 강제는 향후 과제)
+
 ## 비범위 (YAGNI)
 
 - 완전 멀티턴 위저드(폐기).
+- diverse 초안의 탭2 이월 시점 측정확인 강제(state-transition guardrail) — 향후.
 - 탭2에 설문/시계열 분석엔진 추가(별도 — 지금은 호환 3종으로 제약해 회피).
 - 측정 윈도우/지연 정밀 feasibility 엔진(지금은 `ab_testable` 플래그 + 경고로 경량 처리).

@@ -122,6 +122,24 @@ def _check_measurement_compatible(key: str) -> bool:
     return bool(cm.conceptual_definition.strip()) and has_compat
 
 
+def _check_pinned_consistency(key: str) -> bool:
+    # abstract → measurement → 사용자 확정 지표(pinned)로 resume → 최종 primary가 pinned와 일치
+    # (편집정의↔지표↔메커니즘 semantic 일관성 회귀 — P4 리뷰 B)
+    from src.hypothesis.pipeline import resume_with_pinned
+    from src.hypothesis.measurement import PinnedMetrics
+    r = run_hypothesis_pipeline("브랜드 인지도를 높이면 매출이 늘어난다", mode="quick",
+        hypothesis_state="initial_idea", api_key=key, provider=PROVIDER, domain_context="이커머스")
+    if not r.needs_measurement or not (r.measurement and r.measurement.measurements):
+        return False
+    compat = [c for c in r.measurement.measurements[0].candidates if c.ab_testable]
+    if not compat:
+        return False
+    pinned = PinnedMetrics(primary_metric=compat[0].label)
+    r2 = resume_with_pinned("브랜드 인지도를 높이면 매출이 늘어난다", r.expander_output, pinned,
+        mode="quick", api_key=key, provider=PROVIDER, resume_token=r.resume_token)
+    return bool(r2.hypothesis) and r2.hypothesis.suggested_primary_metric == compat[0].label
+
+
 SCENARIOS: list[GoldenScenario] = [
     GoldenScenario("trivial", "trivial → Just Do It", _check_trivial),
     GoldenScenario("clear", "명확 가설 → 게이트 통과", _check_clear),
@@ -134,4 +152,5 @@ SCENARIOS: list[GoldenScenario] = [
     GoldenScenario("classify_clear", "명확 입력 → clear 분류", _check_classify_clear),
     GoldenScenario("classify_abstract", "추상 입력 → abstract/mixed + 구성개념", _check_classify_abstract),
     GoldenScenario("measurement_compatible", "추상 → 개념정의+탭2호환 지표 후보", _check_measurement_compatible),
+    GoldenScenario("pinned_consistency", "확정 지표가 최종 가설 primary로 일관 반영", _check_pinned_consistency),
 ]
