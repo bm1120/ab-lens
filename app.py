@@ -336,20 +336,24 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 + ", ".join(mpend["constructs"]))
         if mpend.get("rationale"):
             st.caption(mpend["rationale"])
-        st.caption("개념을 어떻게 정의하고 무엇으로 측정할지 확인하세요. 지표는 탭2가 분석 가능한 것만 후보로 제시됩니다."
-                   if ko else "Confirm how each construct is defined and measured. Only tab-2-compatible metrics are offered.")
-        chosen: list[str] = []
+        st.caption(("원래 아이디어: " if ko else "Original idea: ") + f"*{mpend['idea']}*  ·  "
+                   + ("지표는 탭2가 분석 가능한 것만 후보로 제시됩니다." if ko
+                      else "Only tab-2-compatible metrics are offered."))
+        # 구성개념별 (편집된 정의, 선택 지표) 수집 — 대응 보존 (리뷰 A/B)
+        per_construct: list[tuple[str, str, str]] = []
         for ci, cm in enumerate(proposal.measurements):
             st.markdown(f"**{cm.construct_name}**")
-            st.text_area("개념적 정의 (수정 가능)" if ko else "Conceptual definition (editable)",
-                         value=cm.conceptual_definition, key=f"mdef_{ci}")
+            edited_def = st.text_area("개념적 정의 (수정 가능, 고도화에 반영됨)" if ko
+                                      else "Conceptual definition (editable, fed into refinement)",
+                                      value=cm.conceptual_definition, key=f"mdef_{ci}")
             compat = [c for c in cm.candidates if c.ab_testable]
-            labels = [f"{c.label} · {c.metric_type}" for c in compat] + ["기타(직접 입력)" if ko else "Other (type)"]
+            labels = [f"{c.label} · {c.metric_type}" for c in compat] + (["기타(직접 입력)"] if ko else ["Other (type)"])
             sel = st.radio("측정 지표" if ko else "Metric", labels, key=f"mmetric_{ci}")
             if sel.startswith("기타") or sel.startswith("Other"):
-                chosen.append(st.text_input("지표 직접 입력" if ko else "Custom metric", key=f"mcustom_{ci}").strip())
+                metric = st.text_input("지표 직접 입력" if ko else "Custom metric", key=f"mcustom_{ci}").strip()
             else:
-                chosen.append(compat[labels.index(sel)].label)
+                metric = compat[labels.index(sel)].label
+            per_construct.append((cm.construct_name, edited_def, metric))
             if cm.proxy_warning:
                 st.warning(f"⚠️ {cm.proxy_warning}")
             incompat = [c for c in cm.candidates if not c.ab_testable]
@@ -361,17 +365,36 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                         st.caption(cm.incompatible_note)
         if proposal.needs_question and proposal.question:
             st.info("ℹ️ " + proposal.question)
-        ca, cb = st.columns(2)
-        confirm = ca.button("이 측정으로 고도화" if ko else "Refine with these metrics", type="primary")
-        skip = cb.button("측정 확인 건너뛰기" if ko else "Skip measurement check")
+
+        # 주요 지표(primary) 명시 선택 — UI 순서에 종속시키지 않음 (리뷰 A)
+        all_metrics = [m for _, _, m in per_construct if m]
+        primary = None
+        if len(all_metrics) > 1:
+            primary = st.radio("주요 지표(primary) 선택" if ko else "Pick the primary metric",
+                               all_metrics, key="m_primary")
+        elif all_metrics:
+            primary = all_metrics[0]
+
+        ca, cb, cc = st.columns(3)
+        confirm = ca.button("이 측정으로 고도화" if ko else "Refine with these", type="primary")
+        skip = cb.button("측정 확인 건너뛰기" if ko else "Skip check")
+        cancel = cc.button("취소" if ko else "Cancel")
+        if cancel:
+            st.session_state.pop("measurement_pending", None)   # 입력 화면으로 복귀 (리뷰 E 탈출구)
+            st.rerun()
         if confirm or skip:
-            chosen = [c for c in chosen if c]
             pinned = None
-            if confirm and chosen:
-                pinned = PinnedMetrics(primary_metric=chosen[0], secondary_metrics=chosen[1:])
-            st.session_state.pop("measurement_pending", None)  # 항상 정리(폼에 갇히지 않게)
+            domain_for_loop = mpend["domain"]
+            if confirm and primary:
+                secondary = [m for m in all_metrics if m != primary]
+                pinned = PinnedMetrics(primary_metric=primary, secondary_metrics=secondary)
+                # 편집 정의 + 개념↔지표 대응을 고도화 컨텍스트로 주입 (리뷰 A/B 해소)
+                mctx = "[측정 정의 확인됨]\n" + "\n".join(
+                    f"- {name}({d}) → 측정지표: {m}" for name, d, m in per_construct if m)
+                domain_for_loop = (mpend["domain"] + "\n\n" + mctx).strip()
+            st.session_state.pop("measurement_pending", None)
             try:
-                _run_loop(mpend["idea"], mpend["mode"], mpend["state"], mpend["domain"], pinned=pinned)
+                _run_loop(mpend["idea"], mpend["mode"], mpend["state"], domain_for_loop, pinned=pinned)
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
                 return
