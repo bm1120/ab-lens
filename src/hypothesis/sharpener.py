@@ -67,6 +67,7 @@ def _build_prompt(
     refinement: dict | None = None,
     prev: HypothesisOutput | None = None,
     domain: str | None = None,
+    pinned: "PinnedMetrics | None" = None,
 ) -> str:
     base = (
         (f"{domain}\n\n" if domain else "")
@@ -75,6 +76,16 @@ def _build_prompt(
         f"암묵적 전제: {exp.implicit_assumptions}\n"
         f"발산된 후보:\n" + "\n".join(f"- {c}" for c in exp.candidate_hypotheses)
     )
+    # 사용자가 측정확인에서 확정한 지표 → 메커니즘을 이 지표 기준으로 일관되게 작성 (P2 리뷰 D)
+    if pinned is not None:
+        sec = ", ".join(pinned.secondary_metrics) or "(없음)"
+        base += (
+            f"\n\n[측정 지표 고정 — 사용자가 확정했다. 반드시 준수]\n"
+            f"suggested_primary_metric 은 정확히 '{pinned.primary_metric}'.\n"
+            f"suggested_secondary_metrics 는 정확히 [{sec}].\n"
+            f"mechanism_path 와 sharpened_hypothesis 는 **이 고정 지표를 측정 대상으로** "
+            f"일관되게 서술하라(다른 지표를 논하지 말 것)."
+        )
     # 멀티턴 루프(T3): 가설품질 스코어카드 피드백을 받아 이전 가설을 재고도화
     if refinement and prev is not None:
         import json
@@ -126,7 +137,7 @@ def sharpen(
     # Round 1: 기존 수렴 + 메커니즘 명시 (refinement 있으면 이전 가설 재고도화 — T3 루프)
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
     out = call_structured(
-        prompt=_build_prompt(idea, expander_output, refinement, prev_hypothesis, domain),
+        prompt=_build_prompt(idea, expander_output, refinement, prev_hypothesis, domain, pinned_metrics),
         system=system,
         schema=HypothesisOutput,
         api_key=api_key,

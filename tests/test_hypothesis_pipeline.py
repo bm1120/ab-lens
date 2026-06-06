@@ -112,6 +112,39 @@ def test_resume_with_pinned_finishes():
     assert sh.call_args.kwargs["pinned_metrics"] is pinned
 
 
+def test_abstract_returns_resume_token():
+    p = _patches(kind="abstract")
+    with ExitStack() as s:
+        for k in ALL:
+            s.enter_context(p[k])
+        out = _run(state="initial_idea")
+    assert out.resume_token  # 무결성 검증용 토큰 발급
+
+
+def test_resume_rejects_tampered_token():
+    # idea 바꿔치기/stale state → 토큰 불일치 → ValueError (P2 리뷰 C)
+    import pytest
+    pinned = PinnedMetrics(primary_metric="x")
+    exp = ExpanderOutput(jtbd_reframe="j", implicit_assumptions=[], candidate_hypotheses=["a"])
+    with pytest.raises(ValueError, match="무결성"):
+        resume_with_pinned("아이디어", exp, pinned, mode="quick",
+                           api_key="k", provider=LLMProvider.ANTHROPIC,
+                           resume_token="wrong-token")
+
+
+def test_resume_accepts_matching_token():
+    from src.hypothesis.pipeline import _resume_token
+    pinned = PinnedMetrics(primary_metric="브랜드 검색량")
+    exp = ExpanderOutput(jtbd_reframe="j", implicit_assumptions=[], candidate_hypotheses=["a"])
+    token = _resume_token("아이디어", exp)
+    with patch("src.hypothesis.pipeline.sharpen", return_value=_hypothesis(raw_idea="x")), \
+         patch("src.hypothesis.pipeline.screen_bias",
+               return_value=BiasScreenResult(biases=[], active_count=0)):
+        out = resume_with_pinned("아이디어", exp, pinned, mode="quick",
+                                 api_key="k", provider=LLMProvider.ANTHROPIC, resume_token=token)
+    assert out.hypothesis is not None
+
+
 def test_progress_emits_classify_node():
     seen = []
     p = _patches(kind="clear")

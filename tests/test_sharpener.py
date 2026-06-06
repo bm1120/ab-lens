@@ -87,6 +87,17 @@ def test_sharpen_pins_user_confirmed_metrics():
     assert out.suggested_secondary_metrics == ["직접 방문"]
 
 
+def test_sharpen_injects_pinned_into_prompt():
+    # pinned 지표가 프롬프트에 들어가 메커니즘을 그 지표 기준으로 쓰게 함 (P2 리뷰 D, 단순 덮어쓰기 아님)
+    from src.hypothesis.measurement import PinnedMetrics
+    pinned = PinnedMetrics(primary_metric="브랜드 검색량", secondary_metrics=["직접 방문"])
+    with patch("src.hypothesis.sharpener.call_structured", return_value=_hypothesis(raw_idea="x")) as m:
+        sharpen("브랜드 인지도", _expander(), api_key="k",
+                provider=LLMProvider.ANTHROPIC, pinned_metrics=pinned)
+    prompt = m.call_args.kwargs["prompt"]
+    assert "브랜드 검색량" in prompt and "고정" in prompt
+
+
 # ── DeepCritique 2라운드 테스트 ──────────────────────────────────────────────
 
 def test_quick_mode_calls_llm_once():

@@ -12,6 +12,7 @@ on_progress 콜백으로 알린다.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel
@@ -36,6 +37,12 @@ class PipelineResult(BaseModel):
     classification: Optional[ConstructClassification] = None
     measurement: Optional[MeasurementProposal] = None
     expander_output: Optional[ExpanderOutput] = None   # resume 재개용
+    resume_token: Optional[str] = None                 # idea+expander 무결성 검증용 (P2 리뷰 C)
+
+
+def _resume_token(idea: str, expander_output: ExpanderOutput) -> str:
+    blob = idea + "\x00" + expander_output.model_dump_json()
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
 def _expander_for(idea, hypothesis_state, *, api_key, provider, lang, model, emit) -> ExpanderOutput:
@@ -95,7 +102,8 @@ def run_hypothesis_pipeline(
         )
         emit("measurement")
         return PipelineResult(trivial=False, needs_measurement=True, classification=classification,
-                              measurement=proposal, expander_output=expander_output)
+                              measurement=proposal, expander_output=expander_output,
+                              resume_token=_resume_token(idea, expander_output))
 
     # clear → 자동 진행
     return _finish(idea, expander_output, mode=mode, api_key=api_key, provider=provider,
@@ -112,11 +120,22 @@ def resume_with_pinned(
     lang: str = "ko",
     on_progress: Optional[Callable[[str], None]] = None,
     model: str | None = None,
+    resume_token: Optional[str] = None,
 ) -> PipelineResult:
-    """측정 확인 게이트 통과 후, 사용자 확정 지표를 고정 주입해 고도화를 마무리한다."""
+    """측정 확인 게이트 통과 후, 사용자 확정 지표를 고정 주입해 고도화를 마무리한다.
+
+    resume_token 이 주어지면 원 실행의 idea+expander_output 과 일치하는지 검증한다
+    (idea 바꿔치기·stale state 오염 방지 — P2 리뷰 C).
+    """
     def emit(node: str) -> None:
         if on_progress is not None:
             on_progress(node)
+
+    if resume_token is not None and resume_token != _resume_token(idea, expander_output):
+        raise ValueError(
+            "resume 무결성 검증 실패: idea/expander_output 이 원 실행과 다릅니다. "
+            "측정 확인을 다시 시작하세요."
+        )
 
     return _finish(idea, expander_output, mode=mode, api_key=api_key, provider=provider,
                    lang=lang, model=model, emit=emit, pinned_metrics=pinned_metrics)
