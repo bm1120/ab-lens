@@ -113,7 +113,7 @@ def run_hypothesis_pipeline(
 def resume_with_pinned(
     idea: str,
     expander_output: ExpanderOutput,
-    pinned_metrics: PinnedMetrics,
+    pinned_metrics: Optional[PinnedMetrics],   # None = 측정확인 건너뛰기(LLM이 지표 선택)
     mode: Literal["quick", "deep"],
     api_key: str,
     provider: LLMProvider,

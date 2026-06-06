@@ -39,6 +39,21 @@ def test_loop_trivial_blocks():
     assert r.trivial is True and r.hypothesis is None
 
 
+def test_loop_forwards_pinned_metrics_to_sharpen():
+    # 측정확인 확정 지표가 루프의 sharpen 호출마다 전달되는지 (P3)
+    from src.hypothesis.measurement import PinnedMetrics
+    seen = {}
+    def sh(*a, **k):
+        seen.update(k)
+        return good_hyp()
+    run_quality_loop("아이디어", api_key="k", provider=None,
+                     pinned_metrics=PinnedMetrics(primary_metric="브랜드 검색량"),
+                     _route=route_ok, _expand=exp_fn, _sharpen=sh,
+                     _judge=lambda *a, **k: GOOD, _bias=bias_fn)
+    assert seen.get("pinned_metrics") is not None
+    assert seen["pinned_metrics"].primary_metric == "브랜드 검색량"
+
+
 def test_loop_pass_first_turn():
     r = run_quality_loop("아이디어", mode="quick", api_key="k", provider=None,
                          _route=route_ok, _expand=exp_fn,

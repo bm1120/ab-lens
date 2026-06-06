@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from src.design_schemas import BiasScreenResult, HypothesisOutput
 from src.llm_client import LLMProvider
 from src.hypothesis.expander import ExpanderOutput, expand
+from src.hypothesis.measurement import PinnedMetrics
 from src.hypothesis.sharpener import sharpen
 from src.hypothesis.bias_screener import screen_bias
 from src.hypothesis.trivial_router import route_trivial
@@ -64,6 +65,7 @@ def run_quality_loop(
     lang: str = "ko",
     model: Optional[str] = None,
     domain: Optional[str] = None,
+    pinned_metrics: Optional["PinnedMetrics"] = None,   # 측정확인 확정 지표 고정(P3)
     on_progress: Optional[Callable[[str], None]] = None,
     # 테스트 주입용 (실제 LLM 호출 대체)
     _sharpen: Optional[Callable] = None,
@@ -100,6 +102,7 @@ def run_quality_loop(
             hyp = sharpen_fn(
                 idea, exp, api_key=api_key, provider=provider, lang=lang, mode=mode, model=model,
                 refinement=refinement, prev_hypothesis=prev, domain=domain,
+                pinned_metrics=pinned_metrics,
             )
             emit(f"sharpener#{turn}")
             # 판정은 생성 model을 안 받음 → provider별 Haiku temp=0으로 고정(T1c 검증, 비용·재현성 보존).
