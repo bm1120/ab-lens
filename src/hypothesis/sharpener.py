@@ -15,6 +15,7 @@ from typing import Literal
 
 from src.design_schemas import HypothesisOutput, RejectedAlternative
 from src.hypothesis.expander import ExpanderOutput
+from src.hypothesis.measurement import PinnedMetrics
 from src.llm_json import call_structured
 from src.schemas import LLMProvider
 
@@ -120,6 +121,7 @@ def sharpen(
     refinement: dict | None = None,
     prev_hypothesis: HypothesisOutput | None = None,
     domain: str | None = None,
+    pinned_metrics: "PinnedMetrics | None" = None,
 ) -> HypothesisOutput:
     # Round 1: 기존 수렴 + 메커니즘 명시 (refinement 있으면 이전 가설 재고도화 — T3 루프)
     system = SYSTEM_KO if lang == "ko" else SYSTEM_EN
@@ -148,5 +150,12 @@ def sharpen(
             model=model,
         )
         out = out2.model_copy(update={"raw_idea": idea})
+
+    # 사용자가 조작화 단계에서 확정한 지표를 고정 주입(LLM 재선택 금지) — P2
+    if pinned_metrics is not None:
+        out = out.model_copy(update={
+            "suggested_primary_metric": pinned_metrics.primary_metric,
+            "suggested_secondary_metrics": pinned_metrics.secondary_metrics,
+        })
 
     return out

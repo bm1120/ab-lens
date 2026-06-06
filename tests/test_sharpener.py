@@ -76,6 +76,17 @@ def test_sharpen_forces_raw_idea_from_input():
     assert out.raw_idea == "결제 전환율을 올리고 싶다"
 
 
+def test_sharpen_pins_user_confirmed_metrics():
+    # 사용자 확정 지표(pinned)가 LLM 출력을 덮어쓴다 (P2: 지표 선택권 사용자에게)
+    from src.hypothesis.measurement import PinnedMetrics
+    pinned = PinnedMetrics(primary_metric="브랜드 검색량", secondary_metrics=["직접 방문"])
+    with patch("src.hypothesis.sharpener.call_structured", return_value=_hypothesis(raw_idea="x")):
+        out = sharpen("브랜드 인지도를 높이고 싶다", _expander(), api_key="k",
+                      provider=LLMProvider.ANTHROPIC, pinned_metrics=pinned)
+    assert out.suggested_primary_metric == "브랜드 검색량"
+    assert out.suggested_secondary_metrics == ["직접 방문"]
+
+
 # ── DeepCritique 2라운드 테스트 ──────────────────────────────────────────────
 
 def test_quick_mode_calls_llm_once():
