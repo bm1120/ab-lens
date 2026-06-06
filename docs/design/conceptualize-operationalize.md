@@ -111,6 +111,15 @@ def sharpen(..., pinned_metrics: PinnedMetrics | None = None):
 - `sharpen(pinned_metrics=...)`: TDD — 확정 지표가 LLM 출력을 덮어쓰는지.
 - 골든셋 `abstract_proxy` 강화: classify=abstract|mixed + 개념정의 산출 + 후보 `metric_type`이 3종.
 
+## 구현 페이즈 (각 페이즈: TDD → 커밋 → 멀티모델 리뷰 반영 → 커밋)
+
+- **P1 측정 코어**: `classify.py`(3분류) + `measurement.py`(개념정의·지표후보) + 스키마. TDD mock + 실LLM 스모크.
+- **P2 파이프라인 통합**: `sharpener` pinned 주입 + `pipeline` classify 라우팅(clear=빠른경로). TDD + e2e.
+- **P3 측정 확인 패널 UI**: 단일 Streamlit 패널, session_state, 탭2 정합 분리표시. app 구동 검증.
+- **P4 검증**: 골든셋 `abstract_proxy` 강화(classify/measurement 시나리오) + 실LLM 골든 통과.
+- **P5 스킬화**: P1~P4에서 반복한 멀티모델 리뷰 워크플로를 `~/.claude/skills/multi-model-review`로 패키징.
+- 종료: feature 브랜치 → **PR 생성**(머지는 사용자 확인 후).
+
 ## 비범위 (YAGNI)
 
 - 완전 멀티턴 위저드(폐기).
