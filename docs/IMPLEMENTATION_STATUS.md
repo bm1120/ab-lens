@@ -2,7 +2,7 @@
 
 > hermes 에이전트 및 협업자용 진행 상황 문서.
 > 설계 플랜: `~/.hermes/plans/2026-06-01_ab-lens.md` (v8)
-> 최종 갱신: 2026-06-07 / 브랜치: `feat/diverse-carryover-guardrail` (PR #15 머지 후 가드레일 작업)
+> 최종 갱신: 2026-06-07 / 브랜치: `main` (PR #16까지 머지)
 
 ## 한눈에 보기
 
@@ -111,7 +111,7 @@ fbec852 baseline: ab-lens v1 (탭2 결과분석 MVP)
 - [x] ~~대안 선택 재실행 1회 제한~~ ✅ **완료** — `app.py` `rerun_count >= 1` enforce
 - [x] ~~실제 LLM 프롬프트 품질 **골든셋** 회귀~~ ✅ **완료** — `pytest -m golden`, `tests/golden/` 12개 시나리오(실LLM 5회 ≥4), 평소 제외(addopts `-m 'not golden'`)
 - [x] ~~**추상 구성개념 → 개념적·조작적 정의화**~~ ✅ **완료 (PR #15 머지, 2026-06-07)** — classify(clear/abstract/mixed) → measurement(개념정의+탭2호환 지표후보) → 측정확인 패널(개념정의 편집+지표선택+primary명시+취소) → sharpen(pinned 프롬프트 주입). 5페이즈 각 멀티모델 리뷰 반영. 모듈: `hypothesis/classify.py`·`measurement.py`, `pipeline.resume_with_pinned`
-- [x] ~~**diverse 초안 → 탭2 이월 가드레일**~~ ✅ **완료** — spec: `docs/design/diverse-carryover-guardrail.md`. 설계 확정(공통 Publish 관문)에서 측정 미확인 + 추상/혼합 구성개념이면 soft 경고 배너 + `[측정 확인하기]` 바로가기(차단 X). 순수 헬퍼 `needs_measurement_warning`(measurement.py, 단위테스트 3개). `measurement_confirmed` 플래그: `_store` 리셋 False + `_run_loop` pinned기반 set + 대안 재실행 명시 리셋. 멀티모델 리뷰 반영: 분류 대상=`hyp.sharpened_hypothesis`(실제 이월 가설), 재고도화 캡션. 테스트 215 + 골든셋 12
+- [x] ~~**diverse 초안 → 탭2 이월 가드레일**~~ ✅ **완료 (PR #16 머지)** — spec: `docs/design/diverse-carryover-guardrail.md`. 설계 확정(공통 Publish 관문)에서 측정 미확인 + 추상/혼합 구성개념이면 soft 경고 배너 + `[측정 확인하기]` 바로가기(차단 X). 순수 헬퍼 `needs_measurement_warning`(measurement.py, 단위테스트 3개). `measurement_confirmed` 플래그: `_store` 리셋 False + `_run_loop` pinned기반 set + 대안 재실행 명시 리셋. 멀티모델 리뷰 반영: 분류 대상=`hyp.sharpened_hypothesis`(실제 이월 가설), 재고도화 캡션. 테스트 215 + 골든셋 12
 - [ ] (확장 로드맵 B) 다중사용자·API 제품화 시 FastAPI 백엔드 분리
 
 > 범용 도구: 멀티모델 리뷰 워크플로(Gemini+Codex 병렬→Claude 가중치 종합)를 `~/.claude/skills/multi-model-review` 스킬로 패키징.
