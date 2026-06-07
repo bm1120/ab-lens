@@ -112,6 +112,10 @@ fbec852 baseline: ab-lens v1 (탭2 결과분석 MVP)
 - [x] ~~실제 LLM 프롬프트 품질 **골든셋** 회귀~~ ✅ **완료** — `pytest -m golden`, `tests/golden/` 12개 시나리오(실LLM 5회 ≥4), 평소 제외(addopts `-m 'not golden'`)
 - [x] ~~**추상 구성개념 → 개념적·조작적 정의화**~~ ✅ **완료 (PR #15 머지, 2026-06-07)** — classify(clear/abstract/mixed) → measurement(개념정의+탭2호환 지표후보) → 측정확인 패널(개념정의 편집+지표선택+primary명시+취소) → sharpen(pinned 프롬프트 주입). 5페이즈 각 멀티모델 리뷰 반영. 모듈: `hypothesis/classify.py`·`measurement.py`, `pipeline.resume_with_pinned`
 - [x] ~~**diverse 초안 → 탭2 이월 가드레일**~~ ✅ **완료 (PR #16 머지)** — spec: `docs/design/diverse-carryover-guardrail.md`. 설계 확정(공통 Publish 관문)에서 측정 미확인 + 추상/혼합 구성개념이면 soft 경고 배너 + `[측정 확인하기]` 바로가기(차단 X). 순수 헬퍼 `needs_measurement_warning`(measurement.py, 단위테스트 3개). `measurement_confirmed` 플래그: `_store` 리셋 False + `_run_loop` pinned기반 set + 대안 재실행 명시 리셋. 멀티모델 리뷰 반영: 분류 대상=`hyp.sharpened_hypothesis`(실제 이월 가설), 재고도화 캡션. 테스트 215 + 골든셋 12
-- [ ] (확장 로드맵 B) 다중사용자·API 제품화 시 FastAPI 백엔드 분리
+> ✅ v8 코어 로드맵 전 항목 완료. 현재 활성 다음 작업 없음 (아래는 백로그).
+
+## 백로그 (현재 진행 안 함) 📦
+
+- **다중사용자·API 제품화 시 FastAPI 백엔드 분리** (확장 로드맵 B). 단일 사용자 도구로는 불필요 — 다중 사용자/외부 API 노출 요구가 생길 때 착수. v8에서 단일 Streamlit 결정은 의도된 것(3-모델 만장일치). 착수 시 세션 격리·작업 큐·자격증명 서버측 관리 재설계 필요.
 
 > 범용 도구: 멀티모델 리뷰 워크플로(Gemini+Codex 병렬→Claude 가중치 종합)를 `~/.claude/skills/multi-model-review` 스킬로 패키징.
