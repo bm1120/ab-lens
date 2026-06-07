@@ -78,6 +78,18 @@ def _post_process(proposal: MeasurementProposal, domain_context: str) -> Measure
     return proposal
 
 
+def needs_measurement_warning(*, construct_kind: str, measurement_confirmed: bool) -> bool:
+    """설계 확정(탭2 이월) 시 측정 타당도 soft 경고 여부 — 순수 판정.
+
+    측정확인(pinned)을 경유했으면 경고 없음. 아니면 추상/혼합 구성개념일 때만 경고.
+    classify 실패는 'mixed'로 반환되므로(보수 편향) 자연히 경고 쪽 — diverse 초안의
+    측정 미확인 추상 가설이 탭2로 새는 것을 차단(soft)하기 위한 가드레일.
+    """
+    if measurement_confirmed:
+        return False
+    return construct_kind in ("abstract", "mixed")
+
+
 def propose_measurement(
     idea: str,
     constructs: list[str],
