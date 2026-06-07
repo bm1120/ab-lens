@@ -22,7 +22,12 @@ from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.hypothesis.quality_loop import run_quality_loop
 from src.hypothesis.classify import classify_construct
-from src.hypothesis.measurement import MeasurementProposal, PinnedMetrics, propose_measurement
+from src.hypothesis.measurement import (
+    MeasurementProposal,
+    PinnedMetrics,
+    needs_measurement_warning,
+    propose_measurement,
+)
 from src.hypothesis.diverse_generator import available_providers, generate_diverse
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
@@ -244,6 +249,9 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 # 설계 컨텍스트 무효화
                 st.session_state.pop("design_context", None)
                 st.session_state.pop("design_doc_md", None)
+                # 대안 가설은 측정확인 미경유 — _store를 안 타므로 여기서 명시 리셋 (stale True 방지, 멀티모델 리뷰 ②)
+                st.session_state["measurement_confirmed"] = False
+                st.session_state.pop("carryover_warn", None)
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
 
@@ -319,8 +327,12 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         st.session_state["hyp_result_initial"] = result
         st.session_state["hyp_result_alt"] = None
         st.session_state["rerun_count"] = 0
+        # 새 결과는 측정확인 미경유에서 출발 — 측정확인(pinned) 경로만 _run_loop이 True로 덮어씀.
+        # diverse/simple/skip/domain 경로는 모두 False → 설계 확정 시 가드레일 대상.
+        st.session_state["measurement_confirmed"] = False
         st.session_state.pop("design_context", None)
         st.session_state.pop("design_doc_md", None)
+        st.session_state.pop("carryover_warn", None)   # 새 결과 → 이전 이월 경고 잔존 방지
 
     def _run_loop(used_idea, used_mode, used_state, domain_str, pinned=None):
         with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
@@ -332,6 +344,8 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             )
             status.update(label="완료" if ko else "Done", state="complete")
         _store(result, used_idea)
+        # 측정확인 패널에서 지표를 확정(pinned)했을 때만 '측정확인 경유'로 표시 (skip은 False 유지)
+        st.session_state["measurement_confirmed"] = pinned is not None
 
     # ── 측정 확인 대기 상태: 추상 구성개념 → 개념적/조작적 정의 확인 패널 (P3) ──
     mpend = st.session_state.get("measurement_pending")
@@ -742,11 +756,58 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                                           metric_review=metric_review)
             st.session_state.design_context = ctx
             st.session_state.design_doc_md = render_design_doc(ctx, hyp)
+            # ── diverse 이월 가드레일: 측정 미확인 + 추상 구성개념 → soft 경고 준비 (1회 재분류) ──
+            # diverse/skip 경로는 측정확인을 안 거쳐 추상 가설이 탭2로 샐 수 있다. 차단은 안 하되 경고.
+            st.session_state.pop("carryover_warn", None)
+            if not st.session_state.get("measurement_confirmed", False):
+                # 탭2로 실제 이월되는 최종 가설을 분류(원아이디어 아님 — 멀티모델 리뷰 ①)
+                guard_text = (hyp.sharpened_hypothesis or "").strip() or st.session_state.get("design_idea") or idea
+                with st.spinner("측정 타당도 점검 중…" if ko else "Checking measurement validity…"):
+                    cls = classify_construct(guard_text, api_key=api_key,
+                                             provider=provider, lang=lang, model=model)
+                if needs_measurement_warning(construct_kind=cls.kind, measurement_confirmed=False):
+                    st.session_state["carryover_warn"] = {
+                        "constructs": cls.constructs or [guard_text],
+                        "rationale": cls.rationale,
+                    }
         except Exception as e:
             st.error(f"설계 생성 오류: {e}" if ko else f"Design error: {e}")
 
     ctx = st.session_state.get("design_context")
     if ctx:
+        # ── 측정 타당도 미확인 soft 경고 (diverse 초안 등) — 차단 X, 탭2 이월 전 환기 ──
+        cwarn = st.session_state.get("carryover_warn")
+        if cwarn:
+            st.warning(
+                ("⚠️ 측정 타당도 미확인 — 추상 구성개념(" + ", ".join(cwarn["constructs"]) + ")인데 "
+                 "개념→조작 정의화를 거치지 않았습니다. 이 지표가 개념을 제대로 재고 있는지 확인하세요."
+                 if ko else
+                 "⚠️ Measurement validity unchecked — abstract construct(s) ("
+                 + ", ".join(cwarn["constructs"]) + ") without operationalization. "
+                 "Confirm the metric actually measures the concept.")
+            )
+            if cwarn.get("rationale"):
+                st.caption(cwarn["rationale"])
+            st.caption("ℹ️ 측정 확인 시 이 가설이 선택 지표 기준으로 **재고도화**되어 문구가 다듬어질 수 있습니다."
+                       if ko else
+                       "ℹ️ Confirming measurement will **re-refine** this hypothesis around the chosen metric (wording may change).")
+            if st.button("🔍 측정 확인하기" if ko else "🔍 Check measurement", key="carryover_fix"):
+                guard_text = (hyp.sharpened_hypothesis or "").strip() or st.session_state.get("design_idea") or idea
+                try:
+                    with st.spinner("측정 지표 후보 도출 중…" if ko else "Proposing metrics…"):
+                        proposal = propose_measurement(
+                            guard_text, cwarn["constructs"], "",
+                            api_key=api_key, provider=provider, lang=lang, model=model)
+                except Exception as e:
+                    st.error(f"오류: {e}" if ko else f"Error: {e}")
+                    return
+                st.session_state["measurement_pending"] = {
+                    "idea": guard_text, "mode": mode, "state": state, "domain": "",
+                    "constructs": cwarn["constructs"], "rationale": cwarn.get("rationale", ""),
+                    "proposal": proposal.model_dump(),
+                }
+                st.session_state.pop("carryover_warn", None)
+                st.rerun()
         st.success(
             f"설계 확정 — 필요 표본 {ctx.target_sample_size:,}명, "
             f"품질 {ctx.design_quality.advisory_score}/100"

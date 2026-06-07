@@ -87,3 +87,26 @@ def test_proxy_warning_field_exists():
     cm = ConstructMeasurement(construct_name="신뢰", conceptual_definition="x",
                               candidates=[], proxy_warning="단기 행동지표는 장기 신뢰의 대리일 뿐")
     assert "대리" in cm.proxy_warning
+
+
+# ── diverse 이월 가드레일: 설계 확정 시 측정 타당도 soft 경고 판정 (순수) ──
+
+def test_warning_when_abstract_and_unconfirmed():
+    # diverse/skip 경로: 추상인데 측정확인 미경유 → 경고
+    from src.hypothesis.measurement import needs_measurement_warning
+    assert needs_measurement_warning(construct_kind="abstract", measurement_confirmed=False) is True
+    assert needs_measurement_warning(construct_kind="mixed", measurement_confirmed=False) is True
+
+
+def test_no_warning_when_confirmed():
+    # 측정확인 경유(pinned) → 추상이어도 경고 없음 (이미 타당도 확인됨)
+    from src.hypothesis.measurement import needs_measurement_warning
+    assert needs_measurement_warning(construct_kind="abstract", measurement_confirmed=True) is False
+    assert needs_measurement_warning(construct_kind="mixed", measurement_confirmed=True) is False
+
+
+def test_no_warning_when_clear():
+    # 명확 구성개념 → 측정확인 불필요, 미경유여도 경고 없음
+    from src.hypothesis.measurement import needs_measurement_warning
+    assert needs_measurement_warning(construct_kind="clear", measurement_confirmed=False) is False
+    assert needs_measurement_warning(construct_kind="clear", measurement_confirmed=True) is False
