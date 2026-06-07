@@ -21,6 +21,8 @@ from src.design_schemas import DesignContext
 from src.context_loop import build_observed_result, context_loop_guard
 from src.hypothesis.pipeline import run_hypothesis_pipeline
 from src.hypothesis.quality_loop import run_quality_loop
+from src.hypothesis.classify import classify_construct
+from src.hypothesis.measurement import MeasurementProposal, PinnedMetrics, propose_measurement
 from src.hypothesis.diverse_generator import available_providers, generate_diverse
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
@@ -305,6 +307,11 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         else:
             st.caption("단일 provider 멀티-롤 (다양성은 롤에서). 키 추가 시 벤더 분산." if ko
                        else "Single-provider multi-role. Add keys for vendor diversity.")
+        st.caption("⚡ 빠른 초안 모드 — 추상 구성개념의 측정 타당도 확인(개념→조작 정의화)은 미적용. "
+                   "추상 개념은 '가설 고도화(quality loop)' 경로를 권장합니다."
+                   if ko else
+                   "⚡ Fast draft — no measurement-validity check for abstract constructs. "
+                   "For abstract ideas, prefer the quality-loop path.")
 
     def _store(result, used_idea):
         st.session_state.hyp_result = result
@@ -315,16 +322,89 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         st.session_state.pop("design_context", None)
         st.session_state.pop("design_doc_md", None)
 
-    def _run_loop(used_idea, used_mode, used_state, domain_str):
+    def _run_loop(used_idea, used_mode, used_state, domain_str, pinned=None):
         with st.status("가설 고도화 중…" if ko else "Refining…", expanded=True) as status:
             result = run_quality_loop(
                 used_idea, mode=used_mode, hypothesis_state=used_state,
                 api_key=api_key, provider=provider, lang=lang, model=model,
-                domain=domain_str or None,
+                domain=domain_str or None, pinned_metrics=pinned,
                 on_progress=lambda node: status.write(f"✓ {node}"),
             )
             status.update(label="완료" if ko else "Done", state="complete")
         _store(result, used_idea)
+
+    # ── 측정 확인 대기 상태: 추상 구성개념 → 개념적/조작적 정의 확인 패널 (P3) ──
+    mpend = st.session_state.get("measurement_pending")
+    if mpend:
+        proposal = MeasurementProposal(**mpend["proposal"])
+        st.info(("🔍 추상 구성개념 감지: " if ko else "🔍 Abstract construct detected: ")
+                + ", ".join(mpend["constructs"]))
+        if mpend.get("rationale"):
+            st.caption(mpend["rationale"])
+        st.caption(("원래 아이디어: " if ko else "Original idea: ") + f"*{mpend['idea']}*  ·  "
+                   + ("지표는 탭2가 분석 가능한 것만 후보로 제시됩니다." if ko
+                      else "Only tab-2-compatible metrics are offered."))
+        # 구성개념별 (편집된 정의, 선택 지표) 수집 — 대응 보존 (리뷰 A/B)
+        per_construct: list[tuple[str, str, str]] = []
+        for ci, cm in enumerate(proposal.measurements):
+            st.markdown(f"**{cm.construct_name}**")
+            edited_def = st.text_area("개념적 정의 (수정 가능, 고도화에 반영됨)" if ko
+                                      else "Conceptual definition (editable, fed into refinement)",
+                                      value=cm.conceptual_definition, key=f"mdef_{ci}")
+            compat = [c for c in cm.candidates if c.ab_testable]
+            labels = [f"{c.label} · {c.metric_type}" for c in compat] + (["기타(직접 입력)"] if ko else ["Other (type)"])
+            sel = st.radio("측정 지표" if ko else "Metric", labels, key=f"mmetric_{ci}")
+            if sel.startswith("기타") or sel.startswith("Other"):
+                metric = st.text_input("지표 직접 입력" if ko else "Custom metric", key=f"mcustom_{ci}").strip()
+            else:
+                metric = compat[labels.index(sel)].label
+            per_construct.append((cm.construct_name, edited_def, metric))
+            if cm.proxy_warning:
+                st.warning(f"⚠️ {cm.proxy_warning}")
+            incompat = [c for c in cm.candidates if not c.ab_testable]
+            if incompat or cm.incompatible_note:
+                with st.expander("⚠️ A/B로 직접 측정 어려운 지표" if ko else "⚠️ Not directly A/B-measurable"):
+                    for c in incompat:
+                        st.write(f"- {c.label}: {c.rationale}")
+                    if cm.incompatible_note:
+                        st.caption(cm.incompatible_note)
+        if proposal.needs_question and proposal.question:
+            st.info("ℹ️ " + proposal.question)
+
+        # 주요 지표(primary) 명시 선택 — UI 순서에 종속시키지 않음 (리뷰 A)
+        all_metrics = [m for _, _, m in per_construct if m]
+        primary = None
+        if len(all_metrics) > 1:
+            primary = st.radio("주요 지표(primary) 선택" if ko else "Pick the primary metric",
+                               all_metrics, key="m_primary")
+        elif all_metrics:
+            primary = all_metrics[0]
+
+        ca, cb, cc = st.columns(3)
+        confirm = ca.button("이 측정으로 고도화" if ko else "Refine with these", type="primary")
+        skip = cb.button("측정 확인 건너뛰기" if ko else "Skip check")
+        cancel = cc.button("취소" if ko else "Cancel")
+        if cancel:
+            st.session_state.pop("measurement_pending", None)   # 입력 화면으로 복귀 (리뷰 E 탈출구)
+            st.rerun()
+        if confirm or skip:
+            pinned = None
+            domain_for_loop = mpend["domain"]
+            if confirm and primary:
+                secondary = [m for m in all_metrics if m != primary]
+                pinned = PinnedMetrics(primary_metric=primary, secondary_metrics=secondary)
+                # 편집 정의 + 개념↔지표 대응을 고도화 컨텍스트로 주입 (리뷰 A/B 해소)
+                mctx = "[측정 정의 확인됨]\n" + "\n".join(
+                    f"- {name}({d}) → 측정지표: {m}" for name, d, m in per_construct if m)
+                domain_for_loop = (mpend["domain"] + "\n\n" + mctx).strip()
+            st.session_state.pop("measurement_pending", None)
+            try:
+                _run_loop(mpend["idea"], mpend["mode"], mpend["state"], domain_for_loop, pinned=pinned)
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+            st.rerun()
+        return
 
     # ── 도메인 질문 대기 상태: 질문 폼 ──
     pend = st.session_state.get("domain_pending")
@@ -377,6 +457,30 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         elif use_loop:
             from src.hypothesis.domain_intake import DomainContext, analyze_domain
             existing = DomainContext(**domain_in)
+            # 측정 확인 게이트: 추상 구성개념이면 개념적→조작적 정의화 패널 먼저 (P3)
+            try:
+                with st.spinner("구성개념 분류 중…" if ko else "Classifying construct…"):
+                    classification = classify_construct(idea, api_key=api_key, provider=provider,
+                                                        lang=lang, model=model)
+            except Exception:
+                classification = None
+            if classification and classification.kind in ("abstract", "mixed"):
+                domain_str0 = existing.to_prompt(lang) if any(domain_in.values()) else ""
+                try:
+                    with st.spinner("측정 지표 후보 도출 중…" if ko else "Proposing metrics…"):
+                        proposal = propose_measurement(
+                            idea, classification.constructs or [idea], domain_str0,
+                            api_key=api_key, provider=provider, lang=lang, model=model)
+                except Exception as e:
+                    st.error(f"오류: {e}" if ko else f"Error: {e}")
+                    return
+                st.session_state["measurement_pending"] = {
+                    "idea": idea, "mode": mode, "state": state, "domain": domain_str0,
+                    "constructs": classification.constructs or [idea],
+                    "rationale": classification.rationale,
+                    "proposal": proposal.model_dump(),
+                }
+                st.rerun()
             try:
                 with st.spinner("도메인 점검 중…" if ko else "Checking domain…"):
                     intake = analyze_domain(idea, existing, api_key=api_key, provider=provider, lang=lang, model=model)
@@ -412,7 +516,17 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                         on_progress=lambda node: status.write(f"✓ {node}"), model=model,
                     )
                     status.update(label="완료" if ko else "Done", state="complete")
-                _store(result, idea)
+                # 단순 경로도 추상 구성개념이면 측정 확인 패널로 (use_loop과 동일 게이트 — 비일관 해소)
+                if result.needs_measurement and result.measurement is not None:
+                    st.session_state["measurement_pending"] = {
+                        "idea": idea, "mode": mode, "state": state, "domain": "",
+                        "constructs": (result.classification.constructs if result.classification else []) or [idea],
+                        "rationale": result.classification.rationale if result.classification else "",
+                        "proposal": result.measurement.model_dump(),
+                    }
+                    st.rerun()
+                else:
+                    _store(result, idea)
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
                 return
