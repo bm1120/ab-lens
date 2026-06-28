@@ -2,6 +2,7 @@
 
 실행 방법:
     uv run pytest tests/test_tab2_e2e.py -v -s --no-header
+    uv run pytest -m golden  # 골든셋 전체
 
 5개 기본 시나리오 + 3개 Context Loop 시나리오 = 8개
 """
@@ -17,10 +18,13 @@ from src.design_schemas import DesignContext, DesignQuality
 TOKEN = get_credential("CLAUDE_CODE_OAUTH_TOKEN")
 PROVIDER = LLMProvider.CLAUDE_CODE
 
-pytestmark = pytest.mark.skipif(
-    not TOKEN,
-    reason="CLAUDE_CODE_OAUTH_TOKEN 없음 — ~/.hermes/.env 확인",
-)
+pytestmark = [
+    pytest.mark.golden,
+    pytest.mark.skipif(
+        not TOKEN,
+        reason="CLAUDE_CODE_OAUTH_TOKEN 없음 — ~/.hermes/.env 확인",
+    ),
+]
 
 
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────

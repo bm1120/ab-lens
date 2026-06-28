@@ -26,6 +26,9 @@ TOKEN = get_credential("CLAUDE_CODE_OAUTH_TOKEN")
 PROVIDER = LLMProvider.CLAUDE_CODE
 SKIP_NO_TOKEN = pytest.mark.skipif(not TOKEN, reason="CLAUDE_CODE_OAUTH_TOKEN 없음 — 스킵")
 
+# 실LLM 호출 테스트 — 평소 제외, 수동 `pytest -m golden`으로 실행
+pytestmark = pytest.mark.golden
+
 IDEA_KO = "버튼 색을 바꾸면 클릭률이 오를 것 같다"
 VALID_BIAS_TYPES = set(BIAS_REFERENCE_POOL.keys())
 
