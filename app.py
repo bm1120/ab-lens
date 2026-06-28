@@ -29,6 +29,8 @@ from src.hypothesis.measurement import (
     propose_measurement,
 )
 from src.hypothesis.diverse_generator import available_providers, generate_diverse
+from src.hypothesis.multi_model_debate import run_debate
+from src.hypothesis.debate_schemas import DebateResult
 from src.design.assembler import DesignFacts, assemble_design_context
 from src.design.doc_generator import render_design_doc
 from src.design.metric_review import review_metrics
@@ -260,16 +262,18 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
         value=st.session_state.get("design_idea", ""),
         placeholder="예: 결제 버튼을 상단으로 옮기면 체크아웃 전환율이 오를 것이다",
     )
-    # ── 생성 방식 선택 (단일 고도화 / 다양 탐색) — 진입점 통합 ──────────────
+    # ── 생성 방식 선택 (단일 고도화 / 다양 탐색 / 멀티모델 심층토론) — 진입점 통합 ──
     approach = st.radio(
         "생성 방식" if ko else "Generation approach",
-        ["single", "diverse"],
+        ["single", "diverse", "debate"],
         format_func=lambda a: ({
-            "single": "🎯 단일 고도화 — 하나의 가설을 깊게 다듬기",
+            "single":  "🎯 단일 고도화 — 하나의 가설을 깊게 다듬기",
             "diverse": "🎲 다양 탐색 — 여러 롤로 발산 후 스코어카드 선별",
+            "debate":  "🔀 멀티모델 심층토론 — 3개 모델 독립 추론 → 교차 비평 → 합성",
         } if ko else {
-            "single": "🎯 Single refine — deepen one hypothesis",
+            "single":  "🎯 Single refine — deepen one hypothesis",
             "diverse": "🎲 Diverse — multiple lenses, scored & ranked",
+            "debate":  "🔀 Multi-model debate — 3 models → cross-critique → synthesis",
         })[a],
         horizontal=True,
     )
@@ -320,6 +324,24 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                    if ko else
                    "⚡ Fast draft — no measurement-validity check for abstract constructs. "
                    "For abstract ideas, prefer the quality-loop path.")
+
+    if approach == "debate":
+        or_key = get_credential("OPENROUTER_API_KEY")
+        _debate_available = bool(api_key and or_key)
+        if _debate_available:
+            st.caption(
+                "🔀 **Claude + GPT + Gemini** 3개 모델이 독립 추론 후 교차 비평 → Opus 합성. "
+                "단일 고도화 대비 **약 3배 느림** (비용: haiku×9 + opus×1)."
+                if ko else
+                "🔀 **Claude + GPT + Gemini** independently reason, cross-critique, then Opus synthesizes. "
+                "~3× slower than single refine (haiku×9 + opus×1)."
+            )
+        else:
+            st.warning(
+                "⚠️ OpenRouter API Key가 필요합니다. 사이드바에서 입력하거나 `~/.hermes/.env`에 `OPENROUTER_API_KEY`를 설정하세요."
+                if ko else
+                "⚠️ OpenRouter API Key required. Enter in sidebar or set `OPENROUTER_API_KEY` in `~/.hermes/.env`."
+            )
 
     def _store(result, used_idea):
         st.session_state.hyp_result = result
@@ -445,9 +467,14 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
             st.rerun()
         return
 
-    btn_label = (("다양 가설 생성" if approach == "diverse" else "가설 고도화") if ko
-                 else ("Run diverse generation" if approach == "diverse" else "Refine hypothesis"))
-    if st.button(btn_label, type="primary"):
+    btn_label = (("다양 가설 생성" if approach == "diverse"
+                  else "🔀 멀티모델 심층토론" if approach == "debate"
+                  else "가설 고도화") if ko
+                 else ("Run diverse generation" if approach == "diverse"
+                       else "🔀 Run multi-model debate" if approach == "debate"
+                       else "Refine hypothesis"))
+    btn_disabled = (approach == "debate" and not (api_key and get_credential("OPENROUTER_API_KEY")))
+    if st.button(btn_label, type="primary", disabled=btn_disabled):
         if not api_key:
             st.error("API 키를 입력하세요." if ko else "Please enter an API key.")
             return
@@ -464,6 +491,26 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                     )
                     status.update(label="완료" if ko else "Done", state="complete")
                 st.session_state["diverse_result"] = dres
+                st.session_state["design_idea"] = idea
+            except Exception as e:
+                st.error(f"오류: {e}" if ko else f"Error: {e}")
+                return
+        elif approach == "debate":
+            try:
+                with st.status(
+                    "🔀 멀티모델 심층토론 중… (Phase 1→2→3, 약 3~5분)" if ko
+                    else "🔀 Multi-model debate… (Phase 1→2→3, ~3–5 min)",
+                    expanded=True,
+                ) as status:
+                    dbt = run_debate(
+                        idea,
+                        primary_provider=provider,
+                        primary_key=api_key,
+                        lang=lang,
+                        on_progress=lambda msg: status.write(f"✓ {msg}"),
+                    )
+                    status.update(label="완료" if ko else "Done", state="complete")
+                st.session_state["debate_result"] = dbt
                 st.session_state["design_idea"] = idea
             except Exception as e:
                 st.error(f"오류: {e}" if ko else f"Error: {e}")
@@ -572,6 +619,115 @@ def render_design_tab(api_key: str, lang: str, provider: LLMProvider, model: str
                 st.rerun()
         if dres.roles_failed:
             st.caption(("실패해 제외된 롤: " if ko else "Excluded (failed): ") + ", ".join(dres.roles_failed))
+
+    # ── 멀티모델 토론 결과 ───────────────────────────────────────────────────
+    dbt: DebateResult | None = st.session_state.get("debate_result")
+    if approach == "debate" and dbt:
+        st.markdown("#### " + ("🔀 멀티모델 토론 결과" if ko else "🔀 Multi-model debate result"))
+
+        # 상태 배지
+        badges = []
+        if dbt.degraded:
+            badges.append(f"⚠️ 축소실행 ({dbt.survived_count}/3 생존)" if ko else f"⚠️ Degraded ({dbt.survived_count}/3 survived)")
+        if dbt.early_exit_unanimous:
+            badges.append("ℹ️ 만장일치 조기종료" if ko else "ℹ️ Early exit (unanimous)")
+        if badges:
+            st.caption(" · ".join(badges))
+
+        # 탭: 합성안 | 불일치 맵 | 독립안 | 교차비평
+        tab_labels = (["✅ 합성안", "🗺 불일치 맵", "📋 독립안 3개", "💬 교차비평"] if ko
+                      else ["✅ Synthesis", "🗺 Divergence map", "📋 Independent drafts", "💬 Cross-critiques"])
+        t_synth, t_div, t_drafts, t_crit = st.tabs(tab_labels)
+
+        with t_synth:
+            synth = dbt.synthesis
+            sc_s = synth.final_scorecard
+            if sc_s:
+                gate = "✅" if sc_s.gate_passed else "🔴"
+                st.caption(f"{gate} {sc_s.total}/100 · {sc_s.grade}")
+            st.markdown(f"**{synth.final_hypothesis.sharpened_hypothesis}**")
+            st.markdown(f"**메커니즘**: {synth.final_hypothesis.mechanism_path}" if ko
+                        else f"**Mechanism**: {synth.final_hypothesis.mechanism_path}")
+            st.markdown(f"**1차 지표**: {synth.final_hypothesis.suggested_primary_metric}" if ko
+                        else f"**Primary metric**: {synth.final_hypothesis.suggested_primary_metric}")
+            with st.expander("합성 근거 (왜 짜깁기가 아닌가)" if ko else "Synthesis rationale"):
+                st.write(synth.synthesis_rationale)
+                if synth.absorbed_from:
+                    st.markdown("**필드별 출처**:" if ko else "**Field sources**:")
+                    for field, src in synth.absorbed_from.items():
+                        st.markdown(f"- `{field}` ← **{src}**")
+                if synth.rejected_with_reason:
+                    st.markdown("**기각 항목**:" if ko else "**Rejected**:")
+                    for item, reason in synth.rejected_with_reason.items():
+                        st.markdown(f"- {item}: *{reason}*")
+
+            # 채택 버튼
+            if st.button("✅ 이 합성안 채택" if ko else "✅ Adopt synthesis", type="primary"):
+                from src.hypothesis.bias_screener import screen_bias
+                from src.hypothesis.quality_loop import QualityLoopResult
+                bscreen = screen_bias(synth.final_hypothesis.sharpened_hypothesis, mode=mode,
+                                      api_key=api_key, provider=provider, lang=lang, model=model)
+                sc_adopt = synth.final_scorecard
+                adopted = QualityLoopResult(
+                    hypothesis=synth.final_hypothesis,
+                    scorecard=sc_adopt,
+                    bias_screen=bscreen,
+                    turns=1, best_turn=1, stop_reason="debate:synthesis",
+                )
+                _store(adopted, idea)
+                st.session_state.pop("debate_result", None)
+                st.rerun()
+
+        with t_div:
+            divs = synth.divergence_verdicts
+            if divs:
+                st.markdown("**모델들이 갈라진 축** — 합성자가 각각 판정" if ko
+                            else "**Divergence axes** — synthesizer's verdicts")
+                for dv in divs:
+                    with st.expander(f"🔀 {dv.axis}"):
+                        for role_val, pos in dv.positions.items():
+                            st.markdown(f"- **{role_val}**: {pos}")
+                        st.markdown(f"**왜 중요한가**: {dv.why_it_matters}" if ko
+                                    else f"**Why it matters**: {dv.why_it_matters}")
+                        st.success(f"**판정**: {dv.verdict}" if ko else f"**Verdict**: {dv.verdict}")
+            else:
+                st.info("불일치 없음 (만장일치 조기종료)" if ko else "No divergence (unanimous early exit)")
+
+        with t_drafts:
+            survivors = [d for d in dbt.drafts if d.hypothesis]
+            failed = [d for d in dbt.drafts if not d.hypothesis]
+            cols = st.columns(max(len(survivors), 1))
+            for col, d in zip(cols, survivors):
+                sc_d = d.scorecard
+                gate = ("✅" if sc_d and sc_d.gate_passed else "🔴") if sc_d else "—"
+                score = f"{sc_d.total}/100" if sc_d else "—"
+                col.markdown(f"**{d.role.value}** {gate} {score}")
+                col.markdown(d.hypothesis.sharpened_hypothesis if d.hypothesis else "—")
+                col.caption(f"메커니즘: {d.hypothesis.mechanism_path}" if d.hypothesis else "")
+            if failed:
+                st.caption(("실패: " if ko else "Failed: ") + ", ".join(d.role.value for d in failed))
+
+        with t_crit:
+            if dbt.critiques:
+                for c in dbt.critiques:
+                    with st.expander(f"{c.critic_role.value} → {c.target_role.value}"):
+                        if c.strengths:
+                            st.markdown("**강점**" if ko else "**Strengths**")
+                            for s in c.strengths:
+                                st.markdown(f"- {s}")
+                        if c.weaknesses:
+                            st.markdown("**약점**" if ko else "**Weaknesses**")
+                            for w in c.weaknesses:
+                                st.markdown(f"- {w}")
+                        if c.steal_worthy:
+                            st.markdown("**흡수할 것**" if ko else "**Steal-worthy**")
+                            for sw in c.steal_worthy:
+                                st.markdown(f"- {sw}")
+                        if c.fatal_flaw:
+                            st.error(f"⚠️ 치명적 결함: {c.fatal_flaw}" if ko
+                                     else f"⚠️ Fatal flaw: {c.fatal_flaw}")
+            else:
+                st.info("교차비평 없음 (만장일치 조기종료)" if ko else "No critiques (unanimous early exit)")
 
     # ── 표시할 결과 결정 (대안 재실행 결과 우선, 없으면 최초 결과) ────────────
     alt_result = st.session_state.get("hyp_result_alt")
