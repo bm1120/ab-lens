@@ -16,7 +16,7 @@ from src.schemas import LLMProvider
 #  - OpenRouter: 점 표기 (anthropic/claude-sonnet-4.5)
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"     # 구형 3.5(EOL)에서 교체
 CLAUDE_CODE_MODEL = "claude-haiku-4-5-20251001"   # OAuth 200 검증, 기본(빠름/한도 여유)
-OPENROUTER_MODEL = "anthropic/claude-sonnet-4.6"  # OpenRouter 카탈로그 검증 (2026-06-28)
+OPENROUTER_MODEL = "anthropic/claude-sonnet-4.6"  # OpenRouter 카탈로그 검증 (2026-06-29)
 
 # ── provider별 선택 가능 모델 목록 ────────────────────────────────────────────
 # Claude Code 구독(OAuth): 하이픈 표기. haiku만 200, 상위는 구독 한도에 따라 429 가능(ID는 유효).
@@ -33,9 +33,9 @@ ANTHROPIC_MODELS: list[str] = [
     "claude-sonnet-4-6",
     "claude-opus-4-8",
 ]
-# OpenRouter: 점 표기 (카탈로그 /models 검증 — 2026-06-28)
+# OpenRouter: 점 표기 (카탈로그 /models 검증 — 2026-06-29)
 OPENROUTER_MODELS: list[str] = [
-    # Anthropic — sonnet-4.8 없음, 4.6이 최신 sonnet
+    # Anthropic — 카탈로그 최신 기준
     "anthropic/claude-sonnet-4.6",
     "anthropic/claude-sonnet-4.5",
     "anthropic/claude-haiku-4.5",

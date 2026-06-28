@@ -39,8 +39,8 @@ _PROVIDER_ENV = {
 }
 
 _OPENROUTER_MODELS = {
-    ModelRole.GPT:    "openai/gpt-5",          # 카탈로그 검증 (2026-06-28)
-    ModelRole.GEMINI: "google/gemini-3.5-flash",  # 카탈로그 검증 (2026-06-28)
+    ModelRole.GPT:    "openai/gpt-5.5-pro",          # 카탈로그 검증 (2026-06-29)
+    ModelRole.GEMINI: "google/gemini-3.5-flash",  # 카탈로그 검증 (2026-06-29)
 }
 
 # 합성은 품질이 중요해서 Opus. Phase1/2는 Haiku(속도/비용).
